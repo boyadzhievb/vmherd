@@ -24,6 +24,8 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 
 	ui.Printf("Creating libvirt network: %s (%s.0/24)\n", networkName, subnetBase)
 
+	bridgeName := truncateBridgeName(networkName)
+
 	netXML := fmt.Sprintf(`<network>
   <name>%s</name>
   <forward mode='nat'/>
@@ -33,7 +35,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
       <range start='%s.100' end='%s.200'/>
     </dhcp>
   </ip>
-</network>`, networkName, networkName, subnetBase, subnetBase, subnetBase)
+</network>`, networkName, bridgeName, subnetBase, subnetBase, subnetBase)
 
 	xmlDir := filepath.Join(stateDir, "network")
 	if err := os.MkdirAll(xmlDir, 0o755); err != nil {
@@ -90,4 +92,14 @@ func virsh(args ...string) error {
 	cmd.Stdout = ui.Stdout()
 	cmd.Stderr = ui.Stderr()
 	return cmd.Run()
+}
+
+const maxBridgeNameLength = 15
+
+// truncateBridgeName ensures the bridge name fits within the Linux 15-char limit.
+func truncateBridgeName(networkName string) string {
+	if len(networkName) <= maxBridgeNameLength {
+		return networkName
+	}
+	return networkName[:maxBridgeNameLength]
 }

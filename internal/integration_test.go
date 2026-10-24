@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	testNetworkName = "vmherd-integration-test"
+	testNetworkName = "vmherd-itest"
 	testSubnetBase  = "192.168.200"
 	testVMIP        = "192.168.200.10"
 	testVMName      = "integ-vm"
 	testSSHUser     = "vmherd"
-	testDomainName  = "vmherd-integration-test-integ-vm"
+	testDomainName  = "vmherd-itest-integ-vm"
 	testDiskDir     = "/var/lib/libvirt/images"
 )
 
