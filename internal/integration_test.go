@@ -75,7 +75,7 @@ func TestFullVMLifecycle(t *testing.T) {
 
 	ciFiles, err := cloudinit.GenerateFiles(
 		stateDir, vmConfig,
-		testSSHUser, strings.TrimSpace(pubKey),
+		testSSHUser, "", strings.TrimSpace(pubKey),
 		testSubnetBase, dnsServer, nil,
 	)
 	if err != nil {
