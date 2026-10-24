@@ -2,7 +2,7 @@ name: PR Security
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
       - name: Flag sensitive file changes
         run: |
-          CHANGED=$(git diff --name-only origin/master...HEAD)
+          CHANGED=$(git diff --name-only origin/main...HEAD)
 
           # CI workflow changes need careful review
           if echo "$CHANGED" | grep -q '.github/workflows/'; then
@@ -43,7 +43,7 @@ jobs:
           fi
 
           # Scan diff for potential hardcoded secrets
-          DIFF=$(git diff origin/master...HEAD)
+          DIFF=$(git diff origin/main...HEAD)
           if echo "$DIFF" | grep -iE '(password|secret|token|api_key|private_key)\s*[:=]' | grep -v '_test.go' | grep -v '_example' | grep -qv '#'; then
             echo "::error::Potential hardcoded secret detected in diff"
             exit 1

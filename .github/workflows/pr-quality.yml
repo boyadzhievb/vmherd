@@ -2,7 +2,7 @@ name: PR Quality
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
           fetch-depth: 0
       - name: Check PR size
         run: |
-          LINES=$(git diff --numstat origin/master...HEAD -- '*.go' | awk '{s+=$1+$2} END {print s+0}')
+          LINES=$(git diff --numstat origin/main...HEAD -- '*.go' | awk '{s+=$1+$2} END {print s+0}')
           echo "Go lines changed: $LINES"
           if [ "$LINES" -gt 1000 ]; then
             echo "::error::PR too large ($LINES lines). Split into smaller PRs."
@@ -35,7 +35,7 @@ jobs:
       - name: Check DCO sign-off
         run: |
           MISSING=0
-          for sha in $(git rev-list origin/master...HEAD); do
+          for sha in $(git rev-list origin/main...HEAD); do
             if ! git log --format='%B' -n 1 "$sha" | grep -q '^Signed-off-by:'; then
               echo "::error::Commit $sha missing Signed-off-by"
               MISSING=1
