@@ -1,0 +1,50 @@
+name: PR Security
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files_url, 'go.mod') || contains(github.event.pull_request.changed_files_url, 'go.sum')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - run: go mod verify
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - run: govulncheck ./...
+
+  sensitive-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Flag sensitive file changes
+        run: |
+          CHANGED=$(git diff --name-only origin/master...HEAD)
+
+          # CI workflow changes need careful review
+          if echo "$CHANGED" | grep -q '.github/workflows/'; then
+            echo "::warning::CI workflow files changed — review for supply chain safety"
+          fi
+
+          # Script changes
+          if echo "$CHANGED" | grep -qE '\.sh$'; then
+            echo "::warning::Shell scripts changed — review for injection risks"
+          fi
+
+          # Scan diff for potential hardcoded secrets
+          DIFF=$(git diff origin/master...HEAD)
+          if echo "$DIFF" | grep -iE '(password|secret|token|api_key|private_key)\s*[:=]' | grep -v '_test.go' | grep -v '_example' | grep -qv '#'; then
+            echo "::error::Potential hardcoded secret detected in diff"
+            exit 1
+          fi

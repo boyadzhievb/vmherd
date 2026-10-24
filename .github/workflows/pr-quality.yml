@@ -1,0 +1,77 @@
+name: PR Quality
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Check PR size
+        run: |
+          LINES=$(git diff --numstat origin/master...HEAD -- '*.go' | awk '{s+=$1+$2} END {print s+0}')
+          echo "Go lines changed: $LINES"
+          if [ "$LINES" -gt 1000 ]; then
+            echo "::error::PR too large ($LINES lines). Split into smaller PRs."
+            exit 1
+          elif [ "$LINES" -gt 500 ]; then
+            echo "::warning::Large PR ($LINES lines). Consider splitting."
+          fi
+
+  dco-signoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Check DCO sign-off
+        run: |
+          MISSING=0
+          for sha in $(git rev-list origin/master...HEAD); do
+            if ! git log --format='%B' -n 1 "$sha" | grep -q '^Signed-off-by:'; then
+              echo "::error::Commit $sha missing Signed-off-by"
+              MISSING=1
+            fi
+          done
+          exit $MISSING
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage.out -short ./...
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          if [ "$(echo "$COVERAGE < 30" | bc)" -eq 1 ]; then
+            echo "::error::Coverage ${COVERAGE}% is below 30% threshold"
+            exit 1
+          fi
+
+  license-header:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check SPDX license headers
+        run: |
+          MISSING=0
+          for f in $(find . -name '*.go' -not -path './vendor/*'); do
+            if ! head -5 "$f" | grep -q 'SPDX-License-Identifier: AGPL-3.0-or-later'; then
+              echo "::error file=$f::Missing SPDX-License-Identifier header"
+              MISSING=1
+            fi
+          done
+          exit $MISSING
