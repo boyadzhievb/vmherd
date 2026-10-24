@@ -107,7 +107,7 @@ Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM 
 
 ### State Management
 
-- Image cache: `~/.local/share/vmherd/images/`
+- Image cache: `~/.vmherd/images/`
 - VM state per project: `.vmherd/` in project directory (SSH keys, cloud-init ISOs, VM metadata)
 - Disk images: `/var/lib/libvirt/images/vmherd-<project>-<name>.qcow2`
 - Networks: libvirt networks prefixed `vmherd-`

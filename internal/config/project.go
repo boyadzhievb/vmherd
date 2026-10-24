@@ -86,7 +86,7 @@ func ImageCacheDir() string {
 	if err != nil {
 		home = os.TempDir()
 	}
-	return filepath.Join(home, ".local", "share", "vmherd", "images")
+	return filepath.Join(home, ".vmherd", "images")
 }
 
 // ExampleHerdfile returns a sample Herdfile for 'vmherd init'.

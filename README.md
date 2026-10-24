@@ -8,6 +8,21 @@ vmherd is a modern, open-source replacement for Vagrant on Linux. It manages loc
 
 ## Install
 
+### Pre-built binaries
+
+Download the latest release from [GitHub Releases](https://github.com/boyadzhievb/vmherd/releases/latest):
+
+| Platform | Binary |
+|----------|--------|
+| Linux x86_64 | [vmherd-linux-amd64.tar.gz](https://github.com/boyadzhievb/vmherd/releases/latest/download/vmherd-linux-amd64.tar.gz) |
+| Linux ARM64 | [vmherd-linux-arm64.tar.gz](https://github.com/boyadzhievb/vmherd/releases/latest/download/vmherd-linux-arm64.tar.gz) |
+
+```bash
+# Example: download and install (amd64)
+curl -fsSL https://github.com/boyadzhievb/vmherd/releases/latest/download/vmherd-linux-amd64.tar.gz | tar xz
+sudo mv vmherd /usr/local/bin/
+```
+
 ### From source
 
 ```bash
@@ -184,7 +199,7 @@ All images are downloaded directly from official distro vendors and verified wit
 
 ## How It Works
 
-1. **Image download** — Official cloud images are fetched from vendor CDNs and cached at `~/.local/share/vmherd/images/`. SHA256 checksums are verified against the vendor's published checksums.
+1. **Image download** — Official cloud images are fetched from vendor CDNs and cached at `~/.vmherd/images/`. SHA256 checksums are verified against the vendor's published checksums.
 
 2. **SSH key generation** — An ed25519 key pair is generated per project and stored in `.vmherd/` in your project directory.
 
@@ -198,7 +213,7 @@ All images are downloaded directly from official distro vendors and verified wit
 
 | What | Where |
 |------|-------|
-| Cloud images | `~/.local/share/vmherd/images/` |
+| Cloud images | `~/.vmherd/images/` |
 | SSH keys, cloud-init ISOs | `.vmherd/` in project directory |
 | VM disks | `/var/lib/libvirt/images/vmherd-{project}-{name}.qcow2` |
 | Networks | libvirt networks prefixed `vmherd-` |
