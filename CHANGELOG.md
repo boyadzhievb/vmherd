@@ -4,6 +4,17 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.5
+
+**2026-10-24** — Console password support
+
+- Add `password` field to Herdfile `ssh:` section for setting a user password via cloud-init
+- Password is SHA-512 hashed via openssl and injected with `lock_passwd: false`
+- Enables `virsh console` login without affecting SSH key-only authentication
+- Fix test compilation after GenerateFiles signature change
+
+---
+
 ## v0.1.4
 
 **2026-10-24** — Shared folders, port forwarding, reload, and provision commands

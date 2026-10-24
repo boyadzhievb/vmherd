@@ -124,6 +124,7 @@ network:
 
 ssh:
   user: vmherd
+  password: changeme              # optional — enables virsh console login
 ```
 
 ### VM fields
@@ -154,6 +155,7 @@ ssh:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `user` | vmherd | SSH user created on all VMs (passwordless sudo) |
+| `password` | — | Optional password for the user (enables `virsh console` login) |
 
 ## Commands
 
