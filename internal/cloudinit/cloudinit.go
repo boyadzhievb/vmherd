@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -24,7 +25,7 @@ type SharedMount struct {
 }
 
 // GenerateFiles creates the cloud-init configuration files for a VM.
-func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, dnsServer string, sharedMounts []SharedMount) (*Files, error) {
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer string, sharedMounts []SharedMount) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
@@ -35,7 +36,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase
 		gateway = subnetBase + ".1"
 	}
 
-	if err := writeUserData(seedDir, vm, sshUser, sshPubKey, sharedMounts); err != nil {
+	if err := writeUserData(seedDir, vm, sshUser, sshPassword, sshPubKey, sharedMounts); err != nil {
 		return nil, err
 	}
 	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer); err != nil {
@@ -52,7 +53,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase
 	}, nil
 }
 
-func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string, sharedMounts []SharedMount) error {
+func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKey string, sharedMounts []SharedMount) error {
 	var builder strings.Builder
 	builder.WriteString("#cloud-config\n")
 	fmt.Fprintf(&builder, "hostname: %s\n", vm.Name)
@@ -61,6 +62,14 @@ func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string, shar
 	fmt.Fprintf(&builder, "  - name: %s\n", sshUser)
 	builder.WriteString("    sudo: ALL=(ALL) NOPASSWD:ALL\n")
 	builder.WriteString("    shell: /bin/bash\n")
+	if userPassword != "" {
+		hashedPassword, err := hashPassword(userPassword)
+		if err != nil {
+			return err
+		}
+		builder.WriteString("    lock_passwd: false\n")
+		fmt.Fprintf(&builder, "    passwd: %s\n", hashedPassword)
+	}
 	builder.WriteString("    ssh_authorized_keys:\n")
 	fmt.Fprintf(&builder, "      - %s\n", sshPubKey)
 	builder.WriteString("ssh_pwauth: false\n")
@@ -145,4 +154,15 @@ ethernets:
 func writeMetaData(seedDir, vmName string) error {
 	content := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmName, vmName)
 	return os.WriteFile(filepath.Join(seedDir, "meta-data"), []byte(content), 0o644)
+}
+
+// hashPassword generates a SHA-512 password hash using openssl.
+func hashPassword(plaintext string) (string, error) {
+	cmd := exec.Command("openssl", "passwd", "-6", "-stdin")
+	cmd.Stdin = strings.NewReader(plaintext)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("cannot hash password: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }

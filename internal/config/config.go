@@ -48,7 +48,8 @@ type NetworkConfig struct {
 
 // SSHConfig holds SSH-related defaults.
 type SSHConfig struct {
-	User string `yaml:"user"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
 }
 
 // Provision defines a single provisioning step.

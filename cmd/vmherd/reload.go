@@ -150,7 +150,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
-		project.Herdfile.SSH.User, strings.TrimSpace(pubKey),
+		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
 		subnetBase, dnsServer, buildCloudInitMounts(sharedMounts),
 	)
 	if err != nil {
