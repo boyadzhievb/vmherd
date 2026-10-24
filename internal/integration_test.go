@@ -85,6 +85,8 @@ func TestFullVMLifecycle(t *testing.T) {
 
 	diskPath := filepath.Join(testDiskDir, testDomainName+".qcow2")
 
+	testMACAddress := "52:54:00:aa:bb:cc"
+
 	if err := vm.Create(vm.CreateOptions{
 		DomainName:         testDomainName,
 		DiskPath:           diskPath,
@@ -92,6 +94,7 @@ func TestFullVMLifecycle(t *testing.T) {
 		CloudInitMetaData:  ciFiles.MetaData,
 		CloudInitNetConfig: ciFiles.NetworkConfig,
 		NetworkName:        testNetworkName,
+		MACAddress:         testMACAddress,
 		Memory:             vmConfig.Memory,
 		CPUs:               vmConfig.CPUs,
 		OSVariant:          entry.OSVariant,
