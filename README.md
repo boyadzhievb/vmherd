@@ -95,6 +95,12 @@ vms:
     disk: 20G
     network:
       ip: 192.168.122.10
+    shared_folders:
+      - host: .
+        guest: /vagrant
+    ports:
+      - host: 8080
+        guest: 80
     provision:
       - type: shell
         inline: |
@@ -131,6 +137,8 @@ ssh:
 | `disk` | 20G | Disk size |
 | `network.ip` | — | Static IP address |
 | `network.gateway` | subnet .1 | Gateway IP |
+| `shared_folders` | `[{host: ".", guest: "/vagrant"}]` | Host directories shared via 9p virtio |
+| `ports` | — | Port forwards (`host`→`guest`, protocol: tcp/udp) |
 | `provision` | — | List of provisioning steps |
 
 ### Network fields
@@ -153,7 +161,9 @@ ssh:
 vmherd init                    Create example Herdfile in current directory
 vmherd up [name...]            Create and start VMs (all or named)
 vmherd down [name...]          Stop VMs gracefully
+vmherd reload [name...]        Destroy and recreate VMs (preserves network/keys)
 vmherd destroy [name...]       Stop and remove VMs, disks, and state
+vmherd provision [name...]     Rerun provisioning steps on running VMs
 vmherd status                  Show VM states in table format
 vmherd ssh <name> [-- cmd]     SSH into a VM or run a command
 vmherd scp <src> <dest>        Copy files (name:/path syntax)
@@ -179,6 +189,12 @@ vmherd scp ctrl:/var/log/syslog ./syslog.txt
 
 # Pre-download an image
 vmherd pull debian:bookworm
+
+# Reload a VM after changing its Herdfile config
+vmherd reload ctrl
+
+# Rerun provisioning on running VMs
+vmherd provision
 ```
 
 ## Supported Images

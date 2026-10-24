@@ -4,6 +4,20 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.4
+
+**2026-10-24** — Shared folders, port forwarding, reload, and provision commands
+
+- Add 9p virtio shared folders — host directories mounted into guests (default `./` → `/vagrant`)
+- Add port forwarding via iptables DNAT — map host ports to guest ports (TCP/UDP)
+- Add `vmherd reload [name...]` — destroy and recreate VMs preserving network and SSH keys
+- Add `vmherd provision [name...]` — rerun shell/file provisioning on running VMs via SSH
+- Add `SharedFolder` and `PortForward` config types with validation (port ranges, duplicate detection, absolute guest paths)
+- Port forwarding integrated into `up`, `down`, `destroy`, and `reload` lifecycle commands
+- Consolidated port forwarding helpers into shared module
+
+---
+
 ## v0.1.3
 
 **2026-10-24** — Idempotent network handling, docs update, disable CI cache on self-hosted runner
