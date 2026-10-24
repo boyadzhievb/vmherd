@@ -1,0 +1,43 @@
+{
+  "mcpServers": {},
+  "attribution": {
+    "commit": ""
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // \"\"'); if echo \"$CMD\" | grep -qi 'Co-Authored-By'; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: Do not add Co-Authored-By to commits. Remove it and retry.\"}}'; fi",
+            "statusMessage": "Checking commit for Co-Authored-By..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && go vet ./... 2>&1; VET=$?; if [ $VET -ne 0 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: go vet failed. Fix vet warnings before committing.\"}}'; fi",
+            "statusMessage": "Running go vet..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git tag *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // \"\"'); if echo \"$CMD\" | grep -q 'git tag' && ! echo \"$CMD\" | grep -q 'git tag -'; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: Use annotated tags (git tag -a v0.X.0 -m summary). No lightweight tags.\"}}'; fi",
+            "statusMessage": "Checking tag convention..."
+          }
+        ]
+      }
+    ]
+  }
+}
