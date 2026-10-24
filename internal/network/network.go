@@ -16,7 +16,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 				return fmt.Errorf("cannot start network %s: %w", networkName, err)
 			}
 		}
-		virsh("net-autostart", networkName)
+		_ = virsh("net-autostart", networkName)
 		return nil
 	}
 
@@ -49,7 +49,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 	if err := virsh("net-start", networkName); err != nil {
 		return fmt.Errorf("cannot start network %s: %w", networkName, err)
 	}
-	virsh("net-autostart", networkName)
+	_ = virsh("net-autostart", networkName)
 
 	fmt.Printf("Network %s created.\n", networkName)
 	return nil
@@ -60,7 +60,7 @@ func Destroy(networkName string) error {
 	if !exists(networkName) {
 		return nil
 	}
-	virsh("net-destroy", networkName)
+	_ = virsh("net-destroy", networkName)
 	if err := virsh("net-undefine", networkName); err != nil {
 		return fmt.Errorf("cannot remove network %s: %w", networkName, err)
 	}

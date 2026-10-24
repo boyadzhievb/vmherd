@@ -1,0 +1,56 @@
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/vm"
+	"github.com/spf13/cobra"
+)
+
+const gracefulShutdownWait = 5 * time.Second
+
+func newDownCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "down [name...]",
+		Short: "Stop VMs gracefully (all or named)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			project, err := config.LoadProject()
+			if err != nil {
+				return err
+			}
+
+			vms, err := config.FilterVMs(project.Herdfile, args)
+			if err != nil {
+				return err
+			}
+
+			for _, vmConfig := range vms {
+				domainName := project.DomainName(vmConfig.Name)
+				state := vm.State(domainName)
+
+				if state != "running" {
+					fmt.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
+					continue
+				}
+
+				fmt.Printf("Stopping %s...\n", vmConfig.Name)
+				_ = vm.Shutdown(domainName)
+			}
+
+			time.Sleep(gracefulShutdownWait)
+
+			for _, vmConfig := range vms {
+				domainName := project.DomainName(vmConfig.Name)
+				if vm.State(domainName) == "running" {
+					fmt.Printf("Force-stopping %s...\n", vmConfig.Name)
+					_ = vm.ForceStop(domainName)
+				}
+			}
+
+			fmt.Println("All VMs stopped.")
+			return nil
+		},
+	}
+}

@@ -56,14 +56,14 @@ func GenerateISO(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, 
 func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) error {
 	var builder strings.Builder
 	builder.WriteString("#cloud-config\n")
-	builder.WriteString(fmt.Sprintf("hostname: %s\n", vm.Name))
+	fmt.Fprintf(&builder, "hostname: %s\n", vm.Name)
 	builder.WriteString("manage_etc_hosts: true\n")
 	builder.WriteString("users:\n")
-	builder.WriteString(fmt.Sprintf("  - name: %s\n", sshUser))
+	fmt.Fprintf(&builder, "  - name: %s\n", sshUser)
 	builder.WriteString("    sudo: ALL=(ALL) NOPASSWD:ALL\n")
 	builder.WriteString("    shell: /bin/bash\n")
 	builder.WriteString("    ssh_authorized_keys:\n")
-	builder.WriteString(fmt.Sprintf("      - %s\n", sshPubKey))
+	fmt.Fprintf(&builder, "      - %s\n", sshPubKey)
 	builder.WriteString("ssh_pwauth: false\n")
 	builder.WriteString("package_update: false\n")
 	builder.WriteString("package_upgrade: false\n")
@@ -91,9 +91,9 @@ func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) erro
 					return fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
 				}
 				encoded := base64.StdEncoding.EncodeToString(content)
-				builder.WriteString(fmt.Sprintf("  - path: %s\n", wf.Destination))
+				fmt.Fprintf(&builder, "  - path: %s\n", wf.Destination)
 				builder.WriteString("    encoding: b64\n")
-				builder.WriteString(fmt.Sprintf("    content: %s\n", encoded))
+				fmt.Fprintf(&builder, "    content: %s\n", encoded)
 				builder.WriteString("    permissions: '0755'\n")
 			}
 		}
@@ -102,7 +102,7 @@ func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) erro
 			builder.WriteString("runcmd:\n")
 			for _, cmd := range runcmds {
 				for _, line := range strings.Split(strings.TrimSpace(cmd), "\n") {
-					builder.WriteString(fmt.Sprintf("  - %s\n", line))
+					fmt.Fprintf(&builder, "  - %s\n", line)
 				}
 			}
 		}

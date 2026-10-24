@@ -45,25 +45,25 @@ func Download(entry *Entry) (string, error) {
 
 	fmt.Printf("Downloading %s (%s)...\n", entry.Description, entry.Distro+":"+entry.Codename)
 	if err := downloadFile(entry.ImageURL, tmpPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("download failed for %s: %w", entry.Description, err)
 	}
 
 	fmt.Println("Verifying SHA256 checksum...")
 	expectedHash, err := fetchExpectedChecksum(entry)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("cannot verify checksum for %s: %w", entry.Description, err)
 	}
 
 	actualHash, err := sha256File(tmpPath)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("cannot compute checksum: %w", err)
 	}
 
 	if actualHash != expectedHash {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("SHA256 mismatch for %s:\n  expected: %s\n  got:      %s\n\nThe image may be corrupted. Try 'vmherd pull %s:%s' again",
 			entry.Description, expectedHash, actualHash, entry.Distro, entry.Codename)
 	}
@@ -103,8 +103,8 @@ func fetchExpectedChecksum(entry *Entry) (string, error) {
 		return "", err
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
+	_ = tmpFile.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	if err := downloadFile(entry.ChecksumURL, tmpPath); err != nil {
 		return "", fmt.Errorf("cannot download checksum file: %w", err)
@@ -159,7 +159,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {

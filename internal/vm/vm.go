@@ -77,7 +77,7 @@ func ForceStop(domainName string) error {
 func Destroy(domainName string) error {
 	state := State(domainName)
 	if state == "running" {
-		ForceStop(domainName)
+		_ = ForceStop(domainName)
 	}
 
 	if err := virsh("undefine", domainName, "--remove-all-storage"); err != nil {
