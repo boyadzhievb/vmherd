@@ -22,8 +22,30 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && UNFORMATTED=$(gofmt -l . 2>/dev/null | grep -v vendor/); if [ -n \"$UNFORMATTED\" ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: gofmt check failed. Run gofmt -w on: %s\"}}' \"$UNFORMATTED\"; fi",
+            "statusMessage": "Checking gofmt..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit *)",
+        "hooks": [
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && go vet ./... 2>&1; VET=$?; if [ $VET -ne 0 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: go vet failed. Fix vet warnings before committing.\"}}'; fi",
             "statusMessage": "Running go vet..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && if command -v golangci-lint >/dev/null 2>&1; then LINT=$(golangci-lint run ./... 2>&1); RC=$?; if [ $RC -ne 0 ]; then printf '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"BLOCKED: golangci-lint failed. Fix lint issues before committing.\"}}'; fi; fi",
+            "statusMessage": "Running golangci-lint..."
           }
         ]
       },
