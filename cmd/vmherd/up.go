@@ -10,6 +10,7 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/network"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
@@ -60,12 +61,12 @@ func newUpCmd() *cobra.Command {
 				state := vm.State(domainName)
 
 				if state == "running" {
-					fmt.Printf("%s is already running.\n", vmConfig.Name)
+					ui.Printf("%s is already running.\n", vmConfig.Name)
 					continue
 				}
 
 				if state == "shut off" {
-					fmt.Printf("Starting %s...\n", vmConfig.Name)
+					ui.Printf("Starting %s...\n", vmConfig.Name)
 					if err := vm.Start(domainName); err != nil {
 						return err
 					}
@@ -82,7 +83,7 @@ func newUpCmd() *cobra.Command {
 					return err
 				}
 
-				fmt.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
+				ui.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
 					vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
 				seedISO, err := cloudinit.GenerateISO(
@@ -108,27 +109,27 @@ func newUpCmd() *cobra.Command {
 					return err
 				}
 
-				fmt.Printf("%s created.\n", vmConfig.Name)
+				ui.Printf("%s created.\n", vmConfig.Name)
 			}
 
-			fmt.Println("\nWaiting for SSH on all VMs...")
+			ui.Println("\nWaiting for SSH on all VMs...")
 			for _, vmConfig := range vms {
 				if vmConfig.Network.IP == "" {
 					continue
 				}
-				fmt.Printf("  %s (%s)...", vmConfig.Name, vmConfig.Network.IP)
+				ui.Printf("  %s (%s)...", vmConfig.Name, vmConfig.Network.IP)
 				if err := ssh.WaitForSSH(keyPath, project.Herdfile.SSH.User, vmConfig.Network.IP, vmConfig.Name); err != nil {
-					fmt.Println(" timeout")
+					ui.Println(" timeout")
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 					continue
 				}
-				fmt.Println(" ready")
+				ui.Println(" ready")
 			}
 
-			fmt.Println("\nAll VMs ready:")
+			ui.Println("\nAll VMs ready:")
 			for _, vmConfig := range vms {
 				if vmConfig.Network.IP != "" {
-					fmt.Printf("  %-20s %s   ssh -i %s %s@%s\n",
+					ui.Printf("  %-20s %s   ssh -i %s %s@%s\n",
 						vmConfig.Name, vmConfig.Network.IP, keyPath,
 						project.Herdfile.SSH.User, vmConfig.Network.IP)
 				}

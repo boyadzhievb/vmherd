@@ -6,6 +6,7 @@ import (
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/network"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
@@ -31,11 +32,11 @@ func newDestroyCmd() *cobra.Command {
 				domainName := project.DomainName(vmConfig.Name)
 
 				if !vm.Exists(domainName) {
-					fmt.Printf("%s does not exist, skipping.\n", vmConfig.Name)
+					ui.Printf("%s does not exist, skipping.\n", vmConfig.Name)
 					continue
 				}
 
-				fmt.Printf("Destroying %s...\n", vmConfig.Name)
+				ui.Printf("Destroying %s...\n", vmConfig.Name)
 				if err := vm.Destroy(domainName); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
@@ -50,7 +51,7 @@ func newDestroyCmd() *cobra.Command {
 				}
 			}
 
-			fmt.Println("Done.")
+			ui.Println("Done.")
 			return nil
 		},
 	}

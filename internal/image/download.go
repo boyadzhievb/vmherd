@@ -5,12 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // CachedPath returns the local cache path for an image entry.
@@ -43,13 +44,13 @@ func Download(entry *Entry) (string, error) {
 	cachedPath := CachedPath(entry)
 	tmpPath := cachedPath + ".tmp"
 
-	fmt.Printf("Downloading %s (%s)...\n", entry.Description, entry.Distro+":"+entry.Codename)
+	ui.Printf("Downloading %s (%s)...\n", entry.Description, entry.Distro+":"+entry.Codename)
 	if err := downloadFile(entry.ImageURL, tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("download failed for %s: %w", entry.Description, err)
 	}
 
-	fmt.Println("Verifying SHA256 checksum...")
+	ui.Println("Verifying SHA256 checksum...")
 	expectedHash, err := fetchExpectedChecksum(entry)
 	if err != nil {
 		_ = os.Remove(tmpPath)
@@ -68,7 +69,7 @@ func Download(entry *Entry) (string, error) {
 			entry.Description, expectedHash, actualHash, entry.Distro, entry.Codename)
 	}
 
-	fmt.Println("Checksum verified.")
+	ui.Println("Checksum verified.")
 
 	if err := os.Rename(tmpPath, cachedPath); err != nil {
 		return "", fmt.Errorf("cannot move downloaded image into cache: %w", err)
@@ -78,41 +79,73 @@ func Download(entry *Entry) (string, error) {
 }
 
 func downloadFile(url, destPath string) error {
-	wgetPath, err := exec.LookPath("wget")
-	if err == nil {
-		cmd := exec.Command(wgetPath, "-q", "--show-progress", "-O", destPath, url)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+	resp, err := http.Get(url) //nolint:gosec // URLs come from the built-in registry, not user input
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	curlPath, err := exec.LookPath("curl")
-	if err == nil {
-		cmd := exec.Command(curlPath, "-fL", "--progress-bar", "-o", destPath, url)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("cannot create %s: %w", destPath, err)
+	}
+	defer func() { _ = out.Close() }()
+
+	var reader io.Reader = resp.Body
+	if !ui.IsQuiet() && resp.ContentLength > 0 {
+		reader = &progressReader{
+			reader: resp.Body,
+			total:  resp.ContentLength,
+		}
 	}
 
-	return fmt.Errorf("neither wget nor curl found — install one of them")
+	if _, err := io.Copy(out, reader); err != nil {
+		return fmt.Errorf("download interrupted: %w", err)
+	}
+
+	if !ui.IsQuiet() && resp.ContentLength > 0 {
+		fmt.Println()
+	}
+
+	return nil
+}
+
+type progressReader struct {
+	reader  io.Reader
+	total   int64
+	current int64
+	lastPct int
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.reader.Read(p)
+	pr.current += int64(n)
+	pct := int(pr.current * 100 / pr.total)
+	if pct != pr.lastPct {
+		pr.lastPct = pct
+		fmt.Printf("\r  %3d%% (%d / %d MB)", pct, pr.current/(1024*1024), pr.total/(1024*1024))
+	}
+	return n, err
 }
 
 func fetchExpectedChecksum(entry *Entry) (string, error) {
-	tmpFile, err := os.CreateTemp("", "vmherd-checksum-*")
+	resp, err := http.Get(entry.ChecksumURL) //nolint:gosec // URLs come from the built-in registry
 	if err != nil {
-		return "", err
-	}
-	tmpPath := tmpFile.Name()
-	_ = tmpFile.Close()
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	if err := downloadFile(entry.ChecksumURL, tmpPath); err != nil {
 		return "", fmt.Errorf("cannot download checksum file: %w", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 
-	data, err := os.ReadFile(tmpPath)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d fetching checksum from %s", resp.StatusCode, entry.ChecksumURL)
+	}
+
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("cannot read checksum response: %w", err)
 	}
 
 	return parseChecksum(string(data), entry.Filename)

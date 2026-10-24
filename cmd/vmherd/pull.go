@@ -1,9 +1,8 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/boyadzhievb/vmherd/internal/image"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +28,7 @@ Examples:
 				return err
 			}
 
-			fmt.Printf("Image cached at %s\n", cachedPath)
+			ui.Printf("Image cached at %s\n", cachedPath)
 			return nil
 		},
 	}

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // Ensure creates the libvirt network if it doesn't exist, starts it, and enables autostart.
@@ -20,7 +22,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 		return nil
 	}
 
-	fmt.Printf("Creating libvirt network: %s (%s.0/24)\n", networkName, subnetBase)
+	ui.Printf("Creating libvirt network: %s (%s.0/24)\n", networkName, subnetBase)
 
 	netXML := fmt.Sprintf(`<network>
   <name>%s</name>
@@ -51,7 +53,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 	}
 	_ = virsh("net-autostart", networkName)
 
-	fmt.Printf("Network %s created.\n", networkName)
+	ui.Printf("Network %s created.\n", networkName)
 	return nil
 }
 
@@ -64,7 +66,7 @@ func Destroy(networkName string) error {
 	if err := virsh("net-undefine", networkName); err != nil {
 		return fmt.Errorf("cannot remove network %s: %w", networkName, err)
 	}
-	fmt.Printf("Network %s removed.\n", networkName)
+	ui.Printf("Network %s removed.\n", networkName)
 	return nil
 }
 
@@ -85,7 +87,7 @@ func isActive(networkName string) bool {
 
 func virsh(args ...string) error {
 	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = ui.Stdout()
+	cmd.Stderr = ui.Stderr()
 	return cmd.Run()
 }

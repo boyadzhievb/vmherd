@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
@@ -31,11 +31,11 @@ func newDownCmd() *cobra.Command {
 				state := vm.State(domainName)
 
 				if state != "running" {
-					fmt.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
+					ui.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
 					continue
 				}
 
-				fmt.Printf("Stopping %s...\n", vmConfig.Name)
+				ui.Printf("Stopping %s...\n", vmConfig.Name)
 				_ = vm.Shutdown(domainName)
 			}
 
@@ -44,12 +44,12 @@ func newDownCmd() *cobra.Command {
 			for _, vmConfig := range vms {
 				domainName := project.DomainName(vmConfig.Name)
 				if vm.State(domainName) == "running" {
-					fmt.Printf("Force-stopping %s...\n", vmConfig.Name)
+					ui.Printf("Force-stopping %s...\n", vmConfig.Name)
 					_ = vm.ForceStop(domainName)
 				}
 			}
 
-			fmt.Println("All VMs stopped.")
+			ui.Println("All VMs stopped.")
 			return nil
 		},
 	}

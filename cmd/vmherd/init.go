@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,7 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("cannot write %s: %w", config.HerdfileName, err)
 			}
 
-			fmt.Printf("Created %s — edit it, then run 'vmherd up'\n", config.HerdfileName)
+			ui.Printf("Created %s — edit it, then run 'vmherd up'\n", config.HerdfileName)
 			return nil
 		},
 	}

@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // EnsureKeyPair generates an ed25519 SSH key pair if it doesn't already exist.
@@ -27,14 +29,14 @@ func EnsureKeyPair(stateDir, comment string) (string, error) {
 		"-C", comment,
 		"-q",
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = ui.Stdout()
+	cmd.Stderr = ui.Stderr()
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("cannot generate SSH key: %w", err)
 	}
 
-	fmt.Printf("SSH key generated: %s\n", keyPath)
+	ui.Printf("SSH key generated: %s\n", keyPath)
 	return keyPath, nil
 }
 

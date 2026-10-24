@@ -2,9 +2,10 @@ package vm
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // CreateOptions holds everything needed to create a VM via virt-install.
@@ -42,8 +43,8 @@ func Create(opts CreateOptions) error {
 	}
 
 	cmd := exec.Command("sudo", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = ui.Stdout()
+	cmd.Stderr = ui.Stderr()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("virt-install failed for %s: %w — check that libvirtd is running and you have permission", opts.DomainName, err)
@@ -111,8 +112,8 @@ func createDisk(diskPath, backingImage, diskSize string) error {
 		"-F", "qcow2",
 		diskPath, diskSize,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = ui.Stdout()
+	cmd.Stderr = ui.Stderr()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("cannot create disk %s: %w", diskPath, err)
@@ -122,7 +123,7 @@ func createDisk(diskPath, backingImage, diskSize string) error {
 
 func virsh(args ...string) error {
 	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = ui.Stdout()
+	cmd.Stderr = ui.Stderr()
 	return cmd.Run()
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +20,13 @@ from distro vendors (Ubuntu, Debian, Fedora, Arch, etc.) with cloud-init provisi
 Define your VMs in a Herdfile, then use 'vmherd up' to bring them to life.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			q, _ := cmd.Flags().GetBool("quiet")
+			ui.SetQuiet(q)
+		},
 	}
+
+	rootCmd.PersistentFlags().BoolP("quiet", "q", false, "suppress status output and progress bars")
 
 	rootCmd.AddCommand(
 		newInitCmd(),
