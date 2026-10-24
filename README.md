@@ -44,13 +44,13 @@ vmherd requires these packages on your Linux host:
 
 ```bash
 # Debian/Ubuntu
-sudo apt install qemu-kvm libvirt-daemon-system virtinst cloud-image-utils
+sudo apt install qemu-kvm libvirt-daemon-system virtinst
 
 # Fedora/RHEL
-sudo dnf install qemu-kvm libvirt virt-install cloud-utils
+sudo dnf install qemu-kvm libvirt virt-install
 
 # Arch
-sudo pacman -S qemu-full libvirt virt-install cloud-image-utils
+sudo pacman -S qemu-full libvirt virt-install
 ```
 
 Make sure your user is in the `libvirt` group:
@@ -203,7 +203,7 @@ All images are downloaded directly from official distro vendors and verified wit
 
 2. **SSH key generation** — An ed25519 key pair is generated per project and stored in `.vmherd/` in your project directory.
 
-3. **Cloud-init** — For each VM, vmherd generates cloud-init user-data (SSH key injection, user creation, provisioning), network-config (static IP), and meta-data, then builds a seed ISO using `cloud-localds`.
+3. **Cloud-init** — For each VM, vmherd generates cloud-init user-data (SSH key injection, user creation, provisioning), network-config (static IP), and meta-data. These are passed directly to `virt-install --cloud-init` — no external tools needed.
 
 4. **VM creation** — VMs are created via `virt-install` with a qcow2 disk backed by the cached cloud image (copy-on-write, so disk creation is instant).
 
@@ -214,7 +214,7 @@ All images are downloaded directly from official distro vendors and verified wit
 | What | Where |
 |------|-------|
 | Cloud images | `~/.vmherd/images/` |
-| SSH keys, cloud-init ISOs | `.vmherd/` in project directory |
+| SSH keys, cloud-init files | `.vmherd/` in project directory |
 | VM disks | `/var/lib/libvirt/images/vmherd-{project}-{name}.qcow2` |
 | Networks | libvirt networks prefixed `vmherd-` |
 
