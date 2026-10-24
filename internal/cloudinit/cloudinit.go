@@ -25,7 +25,7 @@ type SharedMount struct {
 }
 
 // GenerateFiles creates the cloud-init configuration files for a VM.
-func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer string, sharedMounts []SharedMount) (*Files, error) {
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer, macAddress string, sharedMounts []SharedMount) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
@@ -39,7 +39,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKe
 	if err := writeUserData(seedDir, vm, sshUser, sshPassword, sshPubKey, sharedMounts); err != nil {
 		return nil, err
 	}
-	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer); err != nil {
+	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer, macAddress); err != nil {
 		return nil, err
 	}
 	if err := writeMetaData(seedDir, vm.Name); err != nil {
@@ -133,12 +133,12 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o644)
 }
 
-func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer string) error {
+func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer, macAddress string) error {
 	content := fmt.Sprintf(`version: 2
 ethernets:
   primary:
     match:
-      name: "en*"
+      macaddress: "%s"
     dhcp4: false
     addresses:
       - %s/24
@@ -148,7 +148,7 @@ ethernets:
     nameservers:
       addresses:
         - %s
-`, ipAddress, gateway, dnsServer)
+`, macAddress, ipAddress, gateway, dnsServer)
 
 	return os.WriteFile(filepath.Join(seedDir, "network-config"), []byte(content), 0o644)
 }

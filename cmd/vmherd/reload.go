@@ -148,10 +148,15 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 
 	sharedMounts := buildSharedMounts(project.Dir, vmConfig)
 
+	macAddress, err := vm.GenerateMACAddress()
+	if err != nil {
+		return err
+	}
+
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
 		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
-		subnetBase, dnsServer, buildCloudInitMounts(sharedMounts),
+		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts),
 	)
 	if err != nil {
 		return err
@@ -164,6 +169,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		CloudInitMetaData:  ciFiles.MetaData,
 		CloudInitNetConfig: ciFiles.NetworkConfig,
 		NetworkName:        project.Herdfile.Network.Name,
+		MACAddress:         macAddress,
 		Memory:             vmConfig.Memory,
 		CPUs:               vmConfig.CPUs,
 		OSVariant:          entry.OSVariant,

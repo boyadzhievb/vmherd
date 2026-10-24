@@ -1,12 +1,22 @@
 package vm
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
+
+// GenerateMACAddress creates a random MAC address with the QEMU OUI prefix (52:54:00).
+func GenerateMACAddress() (string, error) {
+	randomBytes := make([]byte, 3)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", fmt.Errorf("cannot generate MAC address: %w", err)
+	}
+	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", randomBytes[0], randomBytes[1], randomBytes[2]), nil
+}
 
 // SharedFolderMount describes a host directory shared with the guest via 9p virtio.
 type SharedFolderMount struct {
@@ -23,6 +33,7 @@ type CreateOptions struct {
 	CloudInitMetaData  string
 	CloudInitNetConfig string
 	NetworkName        string
+	MACAddress         string
 	Memory             int
 	CPUs               int
 	OSVariant          string
@@ -45,7 +56,7 @@ func Create(opts CreateOptions) error {
 		"--disk", fmt.Sprintf("path=%s,format=qcow2", opts.DiskPath),
 		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
 			opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig),
-		"--network", fmt.Sprintf("network=%s", opts.NetworkName),
+		"--network", fmt.Sprintf("network=%s,mac=%s", opts.NetworkName, opts.MACAddress),
 		"--os-variant", opts.OSVariant,
 		"--graphics", "none",
 		"--noautoconsole",

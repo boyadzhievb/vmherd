@@ -91,10 +91,15 @@ func newUpCmd() *cobra.Command {
 
 				sharedMounts := buildSharedMounts(project.Dir, vmConfig)
 
+				macAddress, err := vm.GenerateMACAddress()
+				if err != nil {
+					return err
+				}
+
 				ciFiles, err := cloudinit.GenerateFiles(
 					project.StateDir, vmConfig,
 					project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
-					subnetBase, dnsServer, buildCloudInitMounts(sharedMounts),
+					subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts),
 				)
 				if err != nil {
 					return err
@@ -107,6 +112,7 @@ func newUpCmd() *cobra.Command {
 					CloudInitMetaData:  ciFiles.MetaData,
 					CloudInitNetConfig: ciFiles.NetworkConfig,
 					NetworkName:        project.Herdfile.Network.Name,
+					MACAddress:         macAddress,
 					Memory:             vmConfig.Memory,
 					CPUs:               vmConfig.CPUs,
 					OSVariant:          entry.OSVariant,
