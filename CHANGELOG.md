@@ -4,6 +4,19 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.3
+
+**2026-10-24** — Idempotent network handling, docs update, disable CI cache on self-hosted runner
+
+- Make network ensure idempotent — `net-define` and `net-start` non-fatal when network already exists
+- Use `virsh net-list` with exact name matching instead of `net-info` for reliable checks
+- Remove `cloud-image-utils` from README prerequisites
+- Update CLAUDE.md to reflect removed dependencies
+- Add full changelog entries for all releases
+- Disable Go module cache upload in integration CI (self-hosted runner has local cache)
+
+---
+
 ## v0.1.2
 
 **2026-10-24** — Replace cloud-localds with virt-install --cloud-init, add test suite and integration CI
