@@ -10,15 +10,17 @@ import (
 
 // CreateOptions holds everything needed to create a VM via virt-install.
 type CreateOptions struct {
-	DomainName  string
-	DiskPath    string
-	SeedISOPath string
-	NetworkName string
-	Memory      int
-	CPUs        int
-	OSVariant   string
-	ImagePath   string
-	DiskSize    string
+	DomainName         string
+	DiskPath           string
+	CloudInitUserData  string
+	CloudInitMetaData  string
+	CloudInitNetConfig string
+	NetworkName        string
+	Memory             int
+	CPUs               int
+	OSVariant          string
+	ImagePath          string
+	DiskSize           string
 }
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
@@ -33,7 +35,8 @@ func Create(opts CreateOptions) error {
 		"--memory", fmt.Sprintf("%d", opts.Memory),
 		"--vcpus", fmt.Sprintf("%d", opts.CPUs),
 		"--disk", fmt.Sprintf("path=%s,format=qcow2", opts.DiskPath),
-		"--disk", fmt.Sprintf("path=%s,device=cdrom", opts.SeedISOPath),
+		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
+			opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig),
 		"--network", fmt.Sprintf("network=%s", opts.NetworkName),
 		"--os-variant", opts.OSVariant,
 		"--graphics", "none",

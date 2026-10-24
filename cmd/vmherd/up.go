@@ -86,7 +86,7 @@ func newUpCmd() *cobra.Command {
 				ui.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
 					vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
-				seedISO, err := cloudinit.GenerateISO(
+				ciFiles, err := cloudinit.GenerateFiles(
 					project.StateDir, vmConfig,
 					project.Herdfile.SSH.User, strings.TrimSpace(pubKey),
 					subnetBase, dnsServer,
@@ -96,15 +96,17 @@ func newUpCmd() *cobra.Command {
 				}
 
 				if err := vm.Create(vm.CreateOptions{
-					DomainName:  domainName,
-					DiskPath:    project.DiskPath(vmConfig.Name),
-					SeedISOPath: seedISO,
-					NetworkName: project.Herdfile.Network.Name,
-					Memory:      vmConfig.Memory,
-					CPUs:        vmConfig.CPUs,
-					OSVariant:   entry.OSVariant,
-					ImagePath:   imagePath,
-					DiskSize:    vmConfig.Disk,
+					DomainName:         domainName,
+					DiskPath:           project.DiskPath(vmConfig.Name),
+					CloudInitUserData:  ciFiles.UserData,
+					CloudInitMetaData:  ciFiles.MetaData,
+					CloudInitNetConfig: ciFiles.NetworkConfig,
+					NetworkName:        project.Herdfile.Network.Name,
+					Memory:             vmConfig.Memory,
+					CPUs:               vmConfig.CPUs,
+					OSVariant:          entry.OSVariant,
+					ImagePath:          imagePath,
+					DiskSize:           vmConfig.Disk,
 				}); err != nil {
 					return err
 				}

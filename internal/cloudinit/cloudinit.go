@@ -4,18 +4,24 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 )
 
-// GenerateISO creates the cloud-init seed ISO for a VM.
-func GenerateISO(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, dnsServer string) (string, error) {
+// Files holds the paths to generated cloud-init configuration files.
+type Files struct {
+	UserData      string
+	MetaData      string
+	NetworkConfig string
+}
+
+// GenerateFiles creates the cloud-init configuration files for a VM.
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, dnsServer string) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o755); err != nil {
-		return "", fmt.Errorf("cannot create seed directory for %s: %w", vm.Name, err)
+		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
 	}
 
 	gateway := vm.Network.Gateway
@@ -24,33 +30,20 @@ func GenerateISO(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, 
 	}
 
 	if err := writeUserData(seedDir, vm, sshUser, sshPubKey); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := writeMetaData(seedDir, vm.Name); err != nil {
-		return "", err
+		return nil, err
 	}
 
-	isoPath := filepath.Join(seedDir, "seed.iso")
-	networkConfigPath := filepath.Join(seedDir, "network-config")
-	userDataPath := filepath.Join(seedDir, "user-data")
-	metaDataPath := filepath.Join(seedDir, "meta-data")
-
-	cmd := exec.Command("cloud-localds",
-		"-v",
-		"--network-config", networkConfigPath,
-		isoPath, userDataPath, metaDataPath,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cloud-localds failed for %s: %w — is cloud-image-utils installed?", vm.Name, err)
-	}
-
-	return isoPath, nil
+	return &Files{
+		UserData:      filepath.Join(seedDir, "user-data"),
+		MetaData:      filepath.Join(seedDir, "meta-data"),
+		NetworkConfig: filepath.Join(seedDir, "network-config"),
+	}, nil
 }
 
 func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) error {
