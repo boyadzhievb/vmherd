@@ -4,6 +4,16 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.6
+
+**2026-10-24** — MAC address based network config
+
+- Generate random MAC address (QEMU OUI 52:54:00) per VM at creation time
+- Match NIC by MAC address in cloud-init netplan instead of hardcoded interface name
+- Fixes network not activating when shared folders shift NIC to different PCI slot (enp2s0 vs enp1s0)
+
+---
+
 ## v0.1.5
 
 **2026-10-24** — Console password support
