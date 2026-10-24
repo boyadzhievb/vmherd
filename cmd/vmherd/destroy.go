@@ -37,6 +37,7 @@ func newDestroyCmd() *cobra.Command {
 				}
 
 				ui.Printf("Destroying %s...\n", vmConfig.Name)
+				teardownPortForwarding(vmConfig)
 				if err := vm.Destroy(domainName); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}

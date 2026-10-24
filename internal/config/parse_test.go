@@ -174,6 +174,224 @@ vms:
 	}
 }
 
+func TestDefaultSharedFolders(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 10.0.0.5
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(hf.VMs[0].SharedFolders) != 1 {
+		t.Fatalf("expected 1 default shared folder, got %d", len(hf.VMs[0].SharedFolders))
+	}
+	if hf.VMs[0].SharedFolders[0].Host != "." {
+		t.Errorf("expected default host '.', got %q", hf.VMs[0].SharedFolders[0].Host)
+	}
+	if hf.VMs[0].SharedFolders[0].Guest != "/vagrant" {
+		t.Errorf("expected default guest '/vagrant', got %q", hf.VMs[0].SharedFolders[0].Guest)
+	}
+}
+
+func TestExplicitSharedFolders(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    shared_folders:
+      - host: ./src
+        guest: /app
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(hf.VMs[0].SharedFolders) != 1 {
+		t.Fatalf("expected 1 shared folder, got %d", len(hf.VMs[0].SharedFolders))
+	}
+	if hf.VMs[0].SharedFolders[0].Host != "./src" {
+		t.Errorf("expected host './src', got %q", hf.VMs[0].SharedFolders[0].Host)
+	}
+	if hf.VMs[0].SharedFolders[0].Guest != "/app" {
+		t.Errorf("expected guest '/app', got %q", hf.VMs[0].SharedFolders[0].Guest)
+	}
+}
+
+func TestSharedFolderRelativeGuestPath(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    shared_folders:
+      - host: .
+        guest: relative/path
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for relative guest path")
+	}
+}
+
+func TestPortForwardDefaults(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 80
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(hf.VMs[0].Ports) != 1 {
+		t.Fatalf("expected 1 port forward, got %d", len(hf.VMs[0].Ports))
+	}
+	if hf.VMs[0].Ports[0].Protocol != "tcp" {
+		t.Errorf("expected default protocol 'tcp', got %q", hf.VMs[0].Ports[0].Protocol)
+	}
+	if hf.VMs[0].Ports[0].Host != 8080 {
+		t.Errorf("expected host port 8080, got %d", hf.VMs[0].Ports[0].Host)
+	}
+	if hf.VMs[0].Ports[0].Guest != 80 {
+		t.Errorf("expected guest port 80, got %d", hf.VMs[0].Ports[0].Guest)
+	}
+}
+
+func TestPortForwardExplicitProtocol(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 5353
+        guest: 53
+        protocol: udp
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if hf.VMs[0].Ports[0].Protocol != "udp" {
+		t.Errorf("expected protocol 'udp', got %q", hf.VMs[0].Ports[0].Protocol)
+	}
+}
+
+func TestPortForwardInvalidHostPort(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 0
+        guest: 80
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid host port")
+	}
+}
+
+func TestPortForwardInvalidGuestPort(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 70000
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid guest port")
+	}
+}
+
+func TestPortForwardInvalidProtocol(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 80
+        protocol: sctp
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid protocol")
+	}
+}
+
+func TestPortForwardDuplicateHostPort(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 80
+  - name: api
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 3000
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate host port across VMs")
+	}
+}
+
 func TestFilterVMs(t *testing.T) {
 	hf := &Herdfile{
 		VMs: []VM{

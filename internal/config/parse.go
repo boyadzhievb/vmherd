@@ -9,7 +9,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const HerdfileName = "Herdfile"
+const (
+	HerdfileName = "Herdfile"
+
+	minPort = 1
+	maxPort = 65535
+
+	defaultPortProtocol      = "tcp"
+	defaultSharedFolderHost  = "."
+	defaultSharedFolderGuest = "/vagrant"
+)
 
 // Load reads and parses a Herdfile from the given directory.
 func Load(dir string) (*Herdfile, error) {
@@ -56,6 +65,16 @@ func applyDefaults(herdfile *Herdfile, dir string) {
 		if herdfile.VMs[i].Disk == "" {
 			herdfile.VMs[i].Disk = "20G"
 		}
+		if len(herdfile.VMs[i].SharedFolders) == 0 {
+			herdfile.VMs[i].SharedFolders = []SharedFolder{
+				{Host: defaultSharedFolderHost, Guest: defaultSharedFolderGuest},
+			}
+		}
+		for j := range herdfile.VMs[i].Ports {
+			if herdfile.VMs[i].Ports[j].Protocol == "" {
+				herdfile.VMs[i].Ports[j].Protocol = defaultPortProtocol
+			}
+		}
 	}
 }
 
@@ -65,6 +84,8 @@ func validate(herdfile *Herdfile) error {
 	}
 
 	names := make(map[string]bool)
+	usedHostPorts := make(map[string]string)
+
 	for _, vm := range herdfile.VMs {
 		if vm.Name == "" {
 			return fmt.Errorf("every VM must have a 'name'")
@@ -82,8 +103,52 @@ func validate(herdfile *Herdfile) error {
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return fmt.Errorf("VM %q: image must be 'distro:codename' format (e.g. ubuntu:noble), got %q", vm.Name, vm.Image)
 		}
+
+		if err := validateSharedFolders(vm); err != nil {
+			return err
+		}
+
+		if err := validatePortForwards(vm, usedHostPorts); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func validateSharedFolders(vm VM) error {
+	for _, sharedFolder := range vm.SharedFolders {
+		if sharedFolder.Host == "" {
+			return fmt.Errorf("VM %q: shared_folders entry has empty 'host' path", vm.Name)
+		}
+		if sharedFolder.Guest == "" {
+			return fmt.Errorf("VM %q: shared_folders entry has empty 'guest' path", vm.Name)
+		}
+		if !strings.HasPrefix(sharedFolder.Guest, "/") {
+			return fmt.Errorf("VM %q: shared_folders guest path %q must be absolute (start with /)", vm.Name, sharedFolder.Guest)
+		}
+	}
+	return nil
+}
+
+func validatePortForwards(vm VM, usedHostPorts map[string]string) error {
+	for _, portForward := range vm.Ports {
+		if portForward.Host < minPort || portForward.Host > maxPort {
+			return fmt.Errorf("VM %q: host port %d is out of range (%d-%d)", vm.Name, portForward.Host, minPort, maxPort)
+		}
+		if portForward.Guest < minPort || portForward.Guest > maxPort {
+			return fmt.Errorf("VM %q: guest port %d is out of range (%d-%d)", vm.Name, portForward.Guest, minPort, maxPort)
+		}
+		if portForward.Protocol != "tcp" && portForward.Protocol != "udp" {
+			return fmt.Errorf("VM %q: port protocol must be 'tcp' or 'udp', got %q", vm.Name, portForward.Protocol)
+		}
+
+		portKey := fmt.Sprintf("%d/%s", portForward.Host, portForward.Protocol)
+		if existingVM, taken := usedHostPorts[portKey]; taken {
+			return fmt.Errorf("VM %q: host port %s is already forwarded by VM %q", vm.Name, portKey, existingVM)
+		}
+		usedHostPorts[portKey] = vm.Name
+	}
 	return nil
 }
 

@@ -98,6 +98,12 @@ vms:
     disk: 20G
     network:
       ip: 192.168.122.10
+    shared_folders:
+      - host: .
+        guest: /vagrant
+    ports:
+      - host: 8080
+        guest: 80
     provision:
       - type: shell
         inline: |

@@ -9,13 +9,28 @@ type Herdfile struct {
 
 // VM defines a single virtual machine.
 type VM struct {
-	Name      string          `yaml:"name"`
-	Image     string          `yaml:"image"`
-	CPUs      int             `yaml:"cpus"`
-	Memory    int             `yaml:"memory"`
-	Disk      string          `yaml:"disk"`
-	Network   VMNetworkConfig `yaml:"network"`
-	Provision []Provision     `yaml:"provision"`
+	Name          string          `yaml:"name"`
+	Image         string          `yaml:"image"`
+	CPUs          int             `yaml:"cpus"`
+	Memory        int             `yaml:"memory"`
+	Disk          string          `yaml:"disk"`
+	Network       VMNetworkConfig `yaml:"network"`
+	SharedFolders []SharedFolder  `yaml:"shared_folders"`
+	Ports         []PortForward   `yaml:"ports"`
+	Provision     []Provision     `yaml:"provision"`
+}
+
+// SharedFolder maps a host directory into the guest filesystem.
+type SharedFolder struct {
+	Host  string `yaml:"host"`
+	Guest string `yaml:"guest"`
+}
+
+// PortForward maps a host port to a guest port.
+type PortForward struct {
+	Host     int    `yaml:"host"`
+	Guest    int    `yaml:"guest"`
+	Protocol string `yaml:"protocol"`
 }
 
 // VMNetworkConfig holds per-VM network settings.

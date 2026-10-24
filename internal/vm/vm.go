@@ -8,6 +8,13 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
+// SharedFolderMount describes a host directory shared with the guest via 9p virtio.
+type SharedFolderMount struct {
+	HostPath  string
+	GuestPath string
+	MountTag  string
+}
+
 // CreateOptions holds everything needed to create a VM via virt-install.
 type CreateOptions struct {
 	DomainName         string
@@ -21,6 +28,7 @@ type CreateOptions struct {
 	OSVariant          string
 	ImagePath          string
 	DiskSize           string
+	SharedFolders      []SharedFolderMount
 }
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
@@ -43,6 +51,12 @@ func Create(opts CreateOptions) error {
 		"--noautoconsole",
 		"--import",
 		"--autostart",
+	}
+
+	for _, sf := range opts.SharedFolders {
+		args = append(args,
+			"--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=mapped", sf.HostPath, sf.MountTag),
+		)
 	}
 
 	cmd := exec.Command("sudo", args...)

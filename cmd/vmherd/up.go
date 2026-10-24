@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
@@ -62,6 +63,7 @@ func newUpCmd() *cobra.Command {
 
 				if state == "running" {
 					ui.Printf("%s is already running.\n", vmConfig.Name)
+					setupPortForwarding(vmConfig)
 					continue
 				}
 
@@ -70,6 +72,7 @@ func newUpCmd() *cobra.Command {
 					if err := vm.Start(domainName); err != nil {
 						return err
 					}
+					setupPortForwarding(vmConfig)
 					continue
 				}
 
@@ -86,10 +89,12 @@ func newUpCmd() *cobra.Command {
 				ui.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
 					vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
+				sharedMounts := buildSharedMounts(project.Dir, vmConfig)
+
 				ciFiles, err := cloudinit.GenerateFiles(
 					project.StateDir, vmConfig,
 					project.Herdfile.SSH.User, strings.TrimSpace(pubKey),
-					subnetBase, dnsServer,
+					subnetBase, dnsServer, buildCloudInitMounts(sharedMounts),
 				)
 				if err != nil {
 					return err
@@ -107,10 +112,12 @@ func newUpCmd() *cobra.Command {
 					OSVariant:          entry.OSVariant,
 					ImagePath:          imagePath,
 					DiskSize:           vmConfig.Disk,
+					SharedFolders:      sharedMounts,
 				}); err != nil {
 					return err
 				}
 
+				setupPortForwarding(vmConfig)
 				ui.Printf("%s created.\n", vmConfig.Name)
 			}
 
@@ -140,4 +147,36 @@ func newUpCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// buildSharedMounts converts Herdfile shared folder config into vm.SharedFolderMount
+// structs with resolved absolute host paths and generated mount tags.
+func buildSharedMounts(projectDir string, vmConfig config.VM) []vm.SharedFolderMount {
+	var mounts []vm.SharedFolderMount
+	for i, sf := range vmConfig.SharedFolders {
+		hostPath := sf.Host
+		if !filepath.IsAbs(hostPath) {
+			hostPath = filepath.Join(projectDir, hostPath)
+		}
+		mountTag := fmt.Sprintf("vmherd_share_%d", i)
+		mounts = append(mounts, vm.SharedFolderMount{
+			HostPath:  hostPath,
+			GuestPath: sf.Guest,
+			MountTag:  mountTag,
+		})
+	}
+	return mounts
+}
+
+// buildCloudInitMounts converts vm.SharedFolderMount into cloudinit.SharedMount
+// for cloud-init 9p mount configuration.
+func buildCloudInitMounts(mounts []vm.SharedFolderMount) []cloudinit.SharedMount {
+	var ciMounts []cloudinit.SharedMount
+	for _, m := range mounts {
+		ciMounts = append(ciMounts, cloudinit.SharedMount{
+			MountTag:  m.MountTag,
+			GuestPath: m.GuestPath,
+		})
+	}
+	return ciMounts
 }

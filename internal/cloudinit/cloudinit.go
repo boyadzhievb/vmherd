@@ -17,8 +17,14 @@ type Files struct {
 	NetworkConfig string
 }
 
+// SharedMount describes a 9p mount to configure in cloud-init.
+type SharedMount struct {
+	MountTag  string
+	GuestPath string
+}
+
 // GenerateFiles creates the cloud-init configuration files for a VM.
-func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, dnsServer string) (*Files, error) {
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase, dnsServer string, sharedMounts []SharedMount) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
@@ -29,7 +35,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase
 		gateway = subnetBase + ".1"
 	}
 
-	if err := writeUserData(seedDir, vm, sshUser, sshPubKey); err != nil {
+	if err := writeUserData(seedDir, vm, sshUser, sshPubKey, sharedMounts); err != nil {
 		return nil, err
 	}
 	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer); err != nil {
@@ -46,7 +52,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPubKey, subnetBase
 	}, nil
 }
 
-func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) error {
+func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string, sharedMounts []SharedMount) error {
 	var builder strings.Builder
 	builder.WriteString("#cloud-config\n")
 	fmt.Fprintf(&builder, "hostname: %s\n", vm.Name)
@@ -98,6 +104,20 @@ func writeUserData(seedDir string, vm config.VM, sshUser, sshPubKey string) erro
 					fmt.Fprintf(&builder, "  - %s\n", line)
 				}
 			}
+		}
+	}
+
+	if len(sharedMounts) > 0 {
+		if !strings.Contains(builder.String(), "runcmd:\n") {
+			builder.WriteString("runcmd:\n")
+		}
+		for _, mount := range sharedMounts {
+			fmt.Fprintf(&builder, "  - mkdir -p %s\n", mount.GuestPath)
+			fmt.Fprintf(&builder, "  - mount -t 9p -o trans=virtio,version=9p2000.L %s %s\n", mount.MountTag, mount.GuestPath)
+		}
+		builder.WriteString("mounts:\n")
+		for _, mount := range sharedMounts {
+			fmt.Fprintf(&builder, "  - [%s, %s, 9p, \"trans=virtio,version=9p2000.L\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath)
 		}
 	}
 

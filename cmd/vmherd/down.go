@@ -36,6 +36,7 @@ func newDownCmd() *cobra.Command {
 				}
 
 				ui.Printf("Stopping %s...\n", vmConfig.Name)
+				teardownPortForwarding(vmConfig)
 				_ = vm.Shutdown(domainName)
 			}
 
