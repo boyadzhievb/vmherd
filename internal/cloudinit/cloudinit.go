@@ -136,7 +136,9 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer string) error {
 	content := fmt.Sprintf(`version: 2
 ethernets:
-  enp1s0:
+  primary:
+    match:
+      name: "en*"
     dhcp4: false
     addresses:
       - %s/24
