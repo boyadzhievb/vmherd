@@ -48,10 +48,14 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 	}
 
 	if err := virsh("net-define", xmlPath); err != nil {
-		return fmt.Errorf("cannot define network %s: %w — is libvirtd running?", networkName, err)
+		if !exists(networkName) {
+			return fmt.Errorf("cannot define network %s: %w — is libvirtd running?", networkName, err)
+		}
 	}
 	if err := virsh("net-start", networkName); err != nil {
-		return fmt.Errorf("cannot start network %s: %w", networkName, err)
+		if !isActive(networkName) {
+			return fmt.Errorf("cannot start network %s: %w", networkName, err)
+		}
 	}
 	_ = virsh("net-autostart", networkName)
 
@@ -73,18 +77,29 @@ func Destroy(networkName string) error {
 }
 
 func exists(networkName string) bool {
-	cmd := exec.Command("sudo", "virsh", "net-info", networkName)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
-}
-
-func isActive(networkName string) bool {
-	out, err := exec.Command("sudo", "virsh", "net-info", networkName).Output()
+	out, err := exec.Command("sudo", "virsh", "net-list", "--all", "--name").Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), "Active:          yes")
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == networkName {
+			return true
+		}
+	}
+	return false
+}
+
+func isActive(networkName string) bool {
+	out, err := exec.Command("sudo", "virsh", "net-list", "--name").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == networkName {
+			return true
+		}
+	}
+	return false
 }
 
 func virsh(args ...string) error {
