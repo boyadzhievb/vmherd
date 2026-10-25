@@ -65,6 +65,9 @@ func Create(opts CreateOptions) error {
 	}
 
 	for _, sf := range opts.SharedFolders {
+		if err := ensureSharedFolderAccess(sf.HostPath); err != nil {
+			return err
+		}
 		args = append(args,
 			"--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=mapped", sf.HostPath, sf.MountTag),
 		)

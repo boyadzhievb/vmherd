@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 func TestSubnetBase(t *testing.T) {
 	project := &Project{
@@ -66,5 +70,47 @@ func TestDiskPath(t *testing.T) {
 	expected := "/var/lib/libvirt/images/vmherd-myproject-ctrl.qcow2"
 	if diskPath != expected {
 		t.Errorf("expected %s, got %s", expected, diskPath)
+	}
+}
+
+// TestSubnetBaseInvalidCIDR verifies that SubnetBase returns an error for invalid CIDR notation.
+func TestSubnetBaseInvalidCIDR(t *testing.T) {
+	project := &Project{
+		Herdfile: &Herdfile{
+			Network: NetworkConfig{Subnet: "not-a-cidr"},
+		},
+	}
+
+	_, err := project.SubnetBase()
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR subnet")
+	}
+}
+
+// TestGatewayIPInvalidCIDR verifies that GatewayIP returns an error for invalid CIDR notation.
+func TestGatewayIPInvalidCIDR(t *testing.T) {
+	project := &Project{
+		Herdfile: &Herdfile{
+			Network: NetworkConfig{Subnet: "not-a-cidr"},
+		},
+	}
+
+	_, err := project.GatewayIP()
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR subnet")
+	}
+}
+
+// TestExampleHerdfileIsValidYAML verifies that ExampleHerdfile produces parseable YAML with at least one VM.
+func TestExampleHerdfileIsValidYAML(t *testing.T) {
+	exampleContent := ExampleHerdfile()
+
+	var herdfile Herdfile
+	if err := yaml.Unmarshal([]byte(exampleContent), &herdfile); err != nil {
+		t.Fatalf("ExampleHerdfile produced invalid YAML: %v", err)
+	}
+
+	if len(herdfile.VMs) == 0 {
+		t.Fatal("ExampleHerdfile must define at least one VM")
 	}
 }

@@ -4,6 +4,18 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.9
+
+**2026-10-25** — 9p shared folder fixes and test coverage
+
+- Fix 9p shared folder permissions: set ACL on host directory so QEMU process (libvirt-qemu) can write via `setfacl`, with `chmod` fallback
+- Fix git clone in 9p shared folders: use `git -c safe.directory=` instead of `git config --global` (root's gitconfig may not exist during cloud-init)
+- Fix install script idempotency: check for `docker-compose.yml` instead of `.git` (stale `.git` persists on host across VM recreations)
+- Fix `git checkout -B` to handle pre-existing branches from partial runs
+- Expand test coverage: new tests for MAC address generation, QEMU user detection, SSH args, cloud-init shared mounts, config edge cases, and image registry helpers
+
+---
+
 ## v0.1.8
 
 **2026-10-25** — Parallel VM creation and DNS loopback fix

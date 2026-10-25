@@ -253,6 +253,225 @@ func TestGenerateFilesWithMissingSourceFile(t *testing.T) {
 	}
 }
 
+// TestGenerateFilesWithSharedMounts verifies that shared mount entries produce runcmd and mounts sections in user-data.
+func TestGenerateFilesWithSharedMounts(t *testing.T) {
+	stateDir := t.TempDir()
+	vmConfig := config.VM{
+		Name:   "test-vm",
+		Image:  "ubuntu:noble",
+		CPUs:   1,
+		Memory: 1024,
+		Disk:   "10G",
+		Network: config.VMNetworkConfig{
+			IP: "192.168.122.10",
+		},
+	}
+
+	sharedMounts := []SharedMount{
+		{MountTag: "vmherd_share_0", GuestPath: "/vagrant"},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	userDataContent := string(userData)
+
+	expectedFragments := []string{
+		"runcmd:",
+		"mkdir -p /vagrant",
+		"mount -t 9p",
+		"vmherd_share_0",
+		"mounts:",
+	}
+
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(userDataContent, fragment) {
+			t.Errorf("user-data missing expected fragment %q", fragment)
+		}
+	}
+}
+
+// TestGenerateFilesWithCombinedProvisioning verifies that both shell and file provisioning steps coexist in user-data.
+func TestGenerateFilesWithCombinedProvisioning(t *testing.T) {
+	stateDir := t.TempDir()
+
+	sourceFile := filepath.Join(t.TempDir(), "install.sh")
+	sourceFileContent := "#!/bin/bash\necho installed"
+	if err := os.WriteFile(sourceFile, []byte(sourceFileContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vmConfig := config.VM{
+		Name:   "test-vm",
+		Image:  "ubuntu:noble",
+		CPUs:   1,
+		Memory: 1024,
+		Disk:   "10G",
+		Network: config.VMNetworkConfig{
+			IP: "192.168.122.10",
+		},
+		Provision: []config.Provision{
+			{Type: "shell", Inline: "apt-get update && apt-get install -y curl"},
+			{Type: "file", Source: sourceFile, Destination: "/tmp/install.sh"},
+		},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	userDataContent := string(userData)
+
+	expectedFragments := []string{
+		"write_files:",
+		"path: /tmp/install.sh",
+		"encoding: b64",
+		"runcmd:",
+		"apt-get update && apt-get install -y curl",
+	}
+
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(userDataContent, fragment) {
+			t.Errorf("user-data missing expected fragment %q", fragment)
+		}
+	}
+}
+
+// TestGenerateFilesWithMultipleSharedMounts verifies that multiple shared mount entries each appear in mounts and runcmd.
+func TestGenerateFilesWithMultipleSharedMounts(t *testing.T) {
+	stateDir := t.TempDir()
+	vmConfig := config.VM{
+		Name:   "test-vm",
+		Image:  "ubuntu:noble",
+		CPUs:   1,
+		Memory: 1024,
+		Disk:   "10G",
+		Network: config.VMNetworkConfig{
+			IP: "192.168.122.10",
+		},
+	}
+
+	sharedMounts := []SharedMount{
+		{MountTag: "vmherd_share_0", GuestPath: "/vagrant"},
+		{MountTag: "vmherd_share_1", GuestPath: "/data"},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	userDataContent := string(userData)
+
+	expectedFragments := []string{
+		"mkdir -p /vagrant",
+		"mkdir -p /data",
+		"vmherd_share_0",
+		"vmherd_share_1",
+		"mount -t 9p",
+		"mounts:",
+	}
+
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(userDataContent, fragment) {
+			t.Errorf("user-data missing expected fragment %q", fragment)
+		}
+	}
+
+	// Verify both mount tags appear in the mounts section by counting occurrences of the mount line pattern.
+	mountTagZeroCount := strings.Count(userDataContent, "vmherd_share_0")
+	mountTagOneCount := strings.Count(userDataContent, "vmherd_share_1")
+	if mountTagZeroCount < 2 {
+		t.Errorf("expected vmherd_share_0 to appear in both runcmd and mounts, found %d occurrences", mountTagZeroCount)
+	}
+	if mountTagOneCount < 2 {
+		t.Errorf("expected vmherd_share_1 to appear in both runcmd and mounts, found %d occurrences", mountTagOneCount)
+	}
+}
+
+// TestGenerateFilesWithSharedMountsAndProvisioning verifies that provisioning steps and shared mounts coexist correctly.
+func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
+	stateDir := t.TempDir()
+
+	sourceFile := filepath.Join(t.TempDir(), "config.sh")
+	sourceFileContent := "#!/bin/bash\necho configured"
+	if err := os.WriteFile(sourceFile, []byte(sourceFileContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vmConfig := config.VM{
+		Name:   "test-vm",
+		Image:  "ubuntu:noble",
+		CPUs:   1,
+		Memory: 1024,
+		Disk:   "10G",
+		Network: config.VMNetworkConfig{
+			IP: "192.168.122.10",
+		},
+		Provision: []config.Provision{
+			{Type: "shell", Inline: "apt-get update"},
+			{Type: "file", Source: sourceFile, Destination: "/tmp/config.sh"},
+		},
+	}
+
+	sharedMounts := []SharedMount{
+		{MountTag: "vmherd_share_0", GuestPath: "/vagrant"},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	userDataContent := string(userData)
+
+	expectedFragments := []string{
+		// File provisioning produces write_files section.
+		"write_files:",
+		"path: /tmp/config.sh",
+		"encoding: b64",
+		// Shell provisioning and shared mount commands share the runcmd section.
+		"runcmd:",
+		"apt-get update",
+		"mkdir -p /vagrant",
+		"mount -t 9p",
+		"vmherd_share_0",
+		// Shared mounts produce the mounts section.
+		"mounts:",
+	}
+
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(userDataContent, fragment) {
+			t.Errorf("user-data missing expected fragment %q", fragment)
+		}
+	}
+
+	// Verify runcmd appears exactly once (provisioning and mounts share one section).
+	runcmdCount := strings.Count(userDataContent, "runcmd:")
+	if runcmdCount != 1 {
+		t.Errorf("expected exactly 1 runcmd section, found %d", runcmdCount)
+	}
+}
+
 func TestGenerateFilesPathsAreCorrect(t *testing.T) {
 	stateDir := t.TempDir()
 	vmConfig := config.VM{

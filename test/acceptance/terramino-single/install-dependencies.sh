@@ -22,15 +22,20 @@ apt-get install -y docker-ce docker-ce-cli containerd.io \
 
 usermod -aG docker vagrant
 
-# Clone Terramino if not already present.
-# The directory may be a 9p mount point (shared folder), so we clone into it
-# with git init + fetch instead of replacing the directory.
-if [ ! -d "/home/vagrant/terramino-go/.git" ]; then
-  cd /home/vagrant/terramino-go
-  git init
-  git remote add origin https://github.com/hashicorp-education/terramino-go.git
-  git fetch origin
-  git checkout -b containerized origin/containerized
+# Clone Terramino into the shared folder.
+# The directory is a 9p mount, so we use git init + fetch instead of clone.
+# Every git command uses -c safe.directory= because cloud-init runs as root
+# but the 9p mount shows a different UID (dubious ownership check).
+# We check for docker-compose.yml rather than .git because a stale .git may
+# persist on the host shared folder across VM recreations.
+REPO=/home/vagrant/terramino-go
+SAFE="-c safe.directory=${REPO}"
+if [ ! -f "${REPO}/docker-compose.yml" ]; then
+  cd "${REPO}"
+  git ${SAFE} init
+  git ${SAFE} remote add origin https://github.com/hashicorp-education/terramino-go.git || true
+  git ${SAFE} fetch origin
+  git ${SAFE} checkout -B containerized origin/containerized
 fi
 
 # Reload helper
