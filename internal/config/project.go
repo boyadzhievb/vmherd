@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -28,13 +30,75 @@ func LoadProject() (*Project, error) {
 		return nil, err
 	}
 
+	stateDir, err := resolveStateDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve state directory: %w", err)
+	}
+
 	return &Project{
 		Dir:      dir,
 		Name:     filepath.Base(dir),
 		Herdfile: herdfile,
-		StateDir: filepath.Join(dir, ".vmherd"),
+		StateDir: stateDir,
 	}, nil
 }
+
+// resolveStateDir determines the persistent state directory for a project.
+// Priority: VMHERD_STATE_DIR env var > global ~/.local/state/vmherd/<hash>.
+// Falls back to the legacy .vmherd/ in-project directory if it already exists.
+func resolveStateDir(projectDir string) (string, error) {
+	if envDir := os.Getenv("VMHERD_STATE_DIR"); envDir != "" {
+		if err := os.MkdirAll(envDir, 0o755); err != nil {
+			return "", fmt.Errorf("cannot create VMHERD_STATE_DIR %s: %w", envDir, err)
+		}
+		return envDir, nil
+	}
+
+	// If .vmherd already exists as a real directory (not a symlink), keep using
+	// it for backwards compatibility — don't move state out from under the user.
+	localDotDir := filepath.Join(projectDir, ".vmherd")
+	if info, err := os.Lstat(localDotDir); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		return localDotDir, nil
+	}
+
+	globalDir, err := globalStateDir(projectDir)
+	if err != nil {
+		return localDotDir, nil
+	}
+
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		return localDotDir, nil
+	}
+
+	return globalDir, nil
+}
+
+// globalStateDir returns $XDG_STATE_HOME/vmherd/<name>-<hash> where the hash
+// is derived from the absolute path of the project directory. This avoids
+// collisions between projects with the same directory name. Falls back to
+// ~/.local/state/vmherd/ when XDG_STATE_HOME is unset.
+func globalStateDir(projectDir string) (string, error) {
+	absPath, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", err
+	}
+
+	pathHash := sha256.Sum256([]byte(absPath))
+	shortHash := hex.EncodeToString(pathHash[:8])
+	dirName := filepath.Base(projectDir) + "-" + shortHash
+
+	stateHome := os.Getenv("XDG_STATE_HOME")
+	if stateHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		stateHome = filepath.Join(home, ".local", "state")
+	}
+
+	return filepath.Join(stateHome, "vmherd", dirName), nil
+}
+
 
 // DomainName returns the libvirt domain name for a VM in this project.
 func (p *Project) DomainName(vmName string) string {
