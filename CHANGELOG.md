@@ -4,6 +4,18 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.7
+
+**2026-10-25** — Persistent XDG state directory and info command
+
+- Store per-project state in `$XDG_STATE_HOME/vmherd/` (~/.local/state/vmherd/) instead of `.vmherd/` in the project directory. Survives `git checkout` and CI workspace wipes.
+- Backwards compatible: existing `.vmherd/` directories continue to work.
+- Override with `VMHERD_STATE_DIR` environment variable.
+- Add `vmherd info ssh-key` — prints the SSH private key path for the current project.
+- Add `vmherd info state-dir` — prints the state directory path for the current project.
+
+---
+
 ## v0.1.6
 
 **2026-10-24** — MAC address based network config
