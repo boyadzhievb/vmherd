@@ -99,7 +99,6 @@ func globalStateDir(projectDir string) (string, error) {
 	return filepath.Join(stateHome, "vmherd", dirName), nil
 }
 
-
 // DomainName returns the libvirt domain name for a VM in this project.
 func (p *Project) DomainName(vmName string) string {
 	return fmt.Sprintf("vmherd-%s-%s", p.Name, vmName)

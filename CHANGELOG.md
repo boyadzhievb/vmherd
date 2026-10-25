@@ -4,6 +4,19 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.8
+
+**2026-10-25** — Parallel VM creation and DNS loopback fix
+
+- Create VMs in parallel with bounded concurrency (up to 4 at a time) via `errgroup`
+- Wait for SSH readiness on all VMs concurrently instead of sequentially
+- Collect all creation errors instead of failing on the first — partial success is reported
+- Fix DNS resolution: skip loopback nameservers (127.0.0.1, 127.0.0.53) from host `/etc/resolv.conf` and fall back to the libvirt gateway (dnsmasq). Fixes provisioning failures on hosts running local DNS caches (systemd-resolved, NetworkManager dnsmasq)
+- Add Terramino acceptance test Herdfiles (single-VM and multi-VM) based on HashiCorp's learn-vagrant-get-started tutorial
+- Add `golang.org/x/sync` dependency
+
+---
+
 ## v0.1.7
 
 **2026-10-25** — Persistent XDG state directory and info command

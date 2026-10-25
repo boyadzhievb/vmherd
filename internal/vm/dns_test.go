@@ -42,15 +42,35 @@ func TestResolveDNSFallsBackToGateway(t *testing.T) {
 }
 
 func TestResolveDNSParsesNameserver(t *testing.T) {
-	// Write a temporary resolv.conf-like content to verify parsing logic.
 	// Since ResolveDNS reads /etc/resolv.conf directly, we test the parsing
-	// function behavior through the exported function on the real system.
+	// behavior through the exported function on the real system.
 	if _, err := os.Stat("/etc/resolv.conf"); err != nil {
 		t.Skip("no /etc/resolv.conf on this system")
 	}
 
 	result := ResolveDNS("auto", "192.168.122.1")
 	if result == "192.168.122.1" {
-		t.Log("resolv.conf has no nameserver entries, fell back to gateway (expected on some systems)")
+		t.Log("resolv.conf has only loopback or no nameserver entries, fell back to gateway")
+	}
+}
+
+func TestIsLoopback(t *testing.T) {
+	tests := []struct {
+		address  string
+		expected bool
+	}{
+		{"127.0.0.1", true},
+		{"127.0.0.53", true},
+		{"127.0.1.1", true},
+		{"::1", true},
+		{"192.168.1.1", false},
+		{"8.8.8.8", false},
+		{"10.0.0.1", false},
+		{"not-an-ip", false},
+	}
+	for _, tt := range tests {
+		if got := isLoopback(tt.address); got != tt.expected {
+			t.Errorf("isLoopback(%q) = %v, want %v", tt.address, got, tt.expected)
+		}
 	}
 }

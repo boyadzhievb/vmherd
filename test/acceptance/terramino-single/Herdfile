@@ -1,0 +1,48 @@
+# Herdfile — Terramino single-VM acceptance test
+# Equivalent of hashicorp-education/learn-vagrant-get-started 3.Vagrantfile
+#
+# Test steps:
+#   mkdir -p terramino-go
+#   vmherd up
+#   curl http://localhost:8081            (frontend)
+#   curl http://localhost:8080/api/scores (backend API)
+#   vmherd ssh terramino
+#   vmherd provision                      (rerun provisioning)
+#   vmherd down && vmherd up              (stop/restart without data loss)
+#   vmherd destroy
+
+vms:
+  - name: terramino
+    image: ubuntu:noble
+    cpus: 2
+    memory: 2048
+    disk: 20G
+    network:
+      ip: 192.168.122.10
+    ports:
+      - host: 8080
+        guest: 8080
+      - host: 8081
+        guest: 8081
+    shared_folders:
+      - host: ./terramino-go
+        guest: /home/vagrant/terramino-go
+    provision:
+      - type: file
+        source: ./install-dependencies.sh
+        destination: /tmp/install-dependencies.sh
+      - type: shell
+        inline: |
+          bash /tmp/install-dependencies.sh
+      - type: shell
+        inline: |
+          cd /home/vagrant/terramino-go
+          docker compose up -d
+
+network:
+  name: vmherd-terramino
+  subnet: 192.168.122.0/24
+  dns: auto
+
+ssh:
+  user: vagrant

@@ -1,0 +1,123 @@
+# Herdfile — Terramino multi-VM acceptance test
+# Equivalent of hashicorp-education/learn-vagrant-get-started 4.Vagrantfile
+#
+# Three VMs (redis, backend, frontend) communicating over a private network.
+# Uses avahi/mDNS for inter-VM service discovery (redis.local, backend.local).
+#
+# Test steps:
+#   mkdir -p redis/terramino-go backend/terramino-go frontend/terramino-go
+#   vmherd up
+#   curl http://localhost:8081            (frontend via nginx)
+#   curl http://localhost:8080/api/scores (backend API)
+#   vmherd ssh backend
+#   vmherd status
+#   vmherd destroy
+
+vms:
+  - name: redis
+    image: ubuntu:noble
+    cpus: 1
+    memory: 1024
+    disk: 10G
+    network:
+      ip: 192.168.122.10
+    ports:
+      - host: 6379
+        guest: 6379
+    shared_folders:
+      - host: ./redis/terramino-go
+        guest: /home/vagrant/terramino-go
+    provision:
+      - type: file
+        source: ./common-dependencies.sh
+        destination: /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          bash /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          cd /home/vagrant/terramino-go
+          docker compose up -d redis
+
+  - name: backend
+    image: ubuntu:noble
+    cpus: 1
+    memory: 1024
+    disk: 10G
+    network:
+      ip: 192.168.122.11
+    ports:
+      - host: 8080
+        guest: 8080
+    shared_folders:
+      - host: ./backend/terramino-go
+        guest: /home/vagrant/terramino-go
+    provision:
+      - type: file
+        source: ./common-dependencies.sh
+        destination: /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          bash /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          cd /home/vagrant/terramino-go
+          for i in $(seq 1 30); do
+            REDIS_IP=$(getent hosts redis.local | awk '{print $1}') && break
+            echo "Waiting for redis.local to be resolvable..."
+            sleep 2
+          done
+          docker build -f Dockerfile.backend -t backend .
+          docker run -d -p 8080:8080 \
+            -e REDIS_HOST=redis.local \
+            -e REDIS_PORT=6379 \
+            -e TERRAMINO_PORT=8080 \
+            --add-host redis.local:${REDIS_IP} \
+            backend
+
+  - name: frontend
+    image: ubuntu:noble
+    cpus: 1
+    memory: 1024
+    disk: 10G
+    network:
+      ip: 192.168.122.12
+    ports:
+      - host: 8081
+        guest: 8081
+    shared_folders:
+      - host: ./frontend/terramino-go
+        guest: /home/vagrant/terramino-go
+    provision:
+      - type: file
+        source: ./common-dependencies.sh
+        destination: /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          bash /tmp/common-dependencies.sh
+      - type: shell
+        inline: |
+          cd /home/vagrant/terramino-go
+          for i in $(seq 1 30); do
+            [ -f nginx.conf ] && break
+            echo "Waiting for nginx.conf to be available..."
+            sleep 2
+          done
+          sed -i 's#proxy_pass http://backend:8080#proxy_pass http://backend.local:8080#' nginx.conf
+          for i in $(seq 1 30); do
+            BACKEND_IP=$(getent hosts backend.local | awk '{print $1}') && break
+            echo "Waiting for backend.local to be resolvable..."
+            sleep 2
+          done
+          docker build -f Dockerfile.frontend -t frontend .
+          docker run -d -p 8081:8081 \
+            --add-host backend.local:${BACKEND_IP} \
+            frontend
+
+network:
+  name: vmherd-terramino
+  subnet: 192.168.122.0/24
+  dns: auto
+
+ssh:
+  user: vagrant
