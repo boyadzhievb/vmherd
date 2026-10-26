@@ -4,6 +4,40 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.11
+
+**2026-10-26** — Fix 49 review findings across two comprehensive code reviews
+
+### Round 1 (26 findings)
+- Validate VM names, network names, IPs, disk sizes, and port forwards at parse time
+- Block path traversal in shared folders and provision file sources
+- Fix multi-line shell provisioning (wrap in `bash -c` instead of splitting)
+- Tighten cloud-init and SSH key file permissions (0600/0700)
+- Stream SHA256 hash during image download instead of download-then-hash
+- Enforce HTTPS for image URLs and clean stale `.tmp` files
+- Clean up orphaned disks on virt-install failure
+- Check VM state before ssh/scp, log shutdown errors instead of swallowing
+- Replace fixed 2s SSH polling with exponential backoff (1s→16s cap)
+- Sort VMs alphabetically in status output for deterministic display
+- Replace global mutable bool with `atomic.Bool` in ui package
+
+### Round 2 (23 findings)
+- Fix single-line runcmd YAML injection (use `bash -c %q` for all entries)
+- Validate `ssh.user` field to prevent cloud-init YAML injection
+- Add `VMState` and `ProvisionType` typed constants, replace 19 raw string comparisons
+- Fix port forwarding idempotency with teardown-before-setup pattern
+- Use exact filename matching in checksum parsing (not substring)
+- Enforce HTTPS for checksum URLs, add 1MB size limit on checksum downloads
+- Restrict subnet validation to /24, reject static IPs in DHCP pool range
+- Tighten state directory (0700) and network XML (0600) permissions
+- Skip 5s sleep in `vmherd down` when no VMs were running
+- Extract shared `virsh()` helper to `internal/libvirt` package
+- Log all previously swallowed errors as warnings
+- Remove dead `CheckConflict` function
+- Add review tracking files and per-feature checklist
+
+---
+
 ## v0.1.10
 
 **2026-10-26** — Add restart command and host collision safety checks
