@@ -472,6 +472,121 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 	}
 }
 
+// TestMultiLineInlineCommandWrappedInBash verifies that multi-line shell commands
+// are wrapped in a bash -c invocation instead of being split into separate runcmd lines.
+func TestMultiLineInlineCommandWrappedInBash(t *testing.T) {
+	stateDir := t.TempDir()
+	multiLineScript := "if true; then\n  echo yes\nfi"
+	vmConfig := config.VM{
+		Name:  "multiline-vm",
+		Image: "ubuntu:noble",
+		Network: config.VMNetworkConfig{
+			IP: "10.0.0.5",
+		},
+		Provision: []config.Provision{
+			{Type: "shell", Inline: multiLineScript},
+		},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, `["/bin/bash", "-c",`) {
+		t.Error("multi-line command should be wrapped in bash -c invocation")
+	}
+
+	// The individual lines of the script must NOT appear as separate runcmd entries.
+	lines := strings.Split(content, "\n")
+	separateIfLine := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "- if true; then" {
+			separateIfLine = true
+		}
+	}
+	if separateIfLine {
+		t.Error("multi-line command was split into separate runcmd entries instead of being wrapped")
+	}
+}
+
+// TestSingleLineInlineCommandNotWrapped verifies that single-line shell commands
+// are emitted as plain runcmd entries without a bash -c wrapper.
+func TestSingleLineInlineCommandNotWrapped(t *testing.T) {
+	stateDir := t.TempDir()
+	vmConfig := config.VM{
+		Name:  "singleline-vm",
+		Image: "ubuntu:noble",
+		Network: config.VMNetworkConfig{
+			IP: "10.0.0.5",
+		},
+		Provision: []config.Provision{
+			{Type: "shell", Inline: "apt-get update"},
+		},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "  - apt-get update\n") {
+		t.Error("single-line command should appear as plain runcmd entry")
+	}
+	if strings.Contains(content, `"/bin/bash"`) {
+		t.Error("single-line command should not be wrapped in bash -c")
+	}
+}
+
+// TestCloudInitFilePermissions verifies that generated cloud-init files are
+// created with restrictive permissions (0600) since they contain sensitive data.
+func TestCloudInitFilePermissions(t *testing.T) {
+	stateDir := t.TempDir()
+	vmConfig := config.VM{
+		Name:  "perms-vm",
+		Image: "ubuntu:noble",
+		Network: config.VMNetworkConfig{
+			IP: "10.0.0.5",
+		},
+	}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedPermission := os.FileMode(0o600)
+	filesToCheck := map[string]string{
+		"user-data":      files.UserData,
+		"meta-data":      files.MetaData,
+		"network-config": files.NetworkConfig,
+	}
+
+	for name, path := range filesToCheck {
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("cannot stat %s at %s: %v", name, path, err)
+		}
+		actualPermission := fileInfo.Mode().Perm()
+		if actualPermission != expectedPermission {
+			t.Errorf("%s has permission %o, expected %o", name, actualPermission, expectedPermission)
+		}
+	}
+}
+
 func TestGenerateFilesPathsAreCorrect(t *testing.T) {
 	stateDir := t.TempDir()
 	vmConfig := config.VM{

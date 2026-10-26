@@ -57,6 +57,37 @@ func TestEnsureKeyPairCreatesNewKey(t *testing.T) {
 	}
 }
 
+func TestEnsureKeyPairSetsRestrictedPermissions(t *testing.T) {
+	dir := t.TempDir()
+
+	keyPath, err := EnsureKeyPair(dir, "perm-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify private key is readable only by owner (0600).
+	keyInfo, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("cannot stat private key: %v", err)
+	}
+	const expectedKeyMode os.FileMode = 0o600
+	actualKeyMode := keyInfo.Mode().Perm()
+	if actualKeyMode != expectedKeyMode {
+		t.Errorf("private key permissions = %04o, want %04o", actualKeyMode, expectedKeyMode)
+	}
+
+	// Verify state directory is restricted to owner (0700).
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("cannot stat state directory: %v", err)
+	}
+	const expectedDirMode os.FileMode = 0o700
+	actualDirMode := dirInfo.Mode().Perm()
+	if actualDirMode != expectedDirMode {
+		t.Errorf("state directory permissions = %04o, want %04o", actualDirMode, expectedDirMode)
+	}
+}
+
 func TestEnsureKeyPairIdempotent(t *testing.T) {
 	dir := t.TempDir()
 

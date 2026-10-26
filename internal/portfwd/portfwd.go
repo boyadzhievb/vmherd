@@ -29,9 +29,9 @@ const (
 
 // Rule describes a single port-forwarding mapping from a host port to a guest port.
 type Rule struct {
-	HostPort  int
-	GuestIP   string
-	GuestPort int
+	HostPort  int    // port number on the host
+	GuestIP   string // VM IP address to forward to
+	GuestPort int    // port number inside the guest
 	Protocol  string // "tcp" or "udp"
 }
 
@@ -127,6 +127,7 @@ func CheckConflict(hostPort int, protocol string) error {
 	return nil
 }
 
+// normalizeProtocol returns a copy of the rule with an empty protocol defaulted to "tcp".
 func normalizeProtocol(rule Rule) Rule {
 	if rule.Protocol == "" {
 		rule.Protocol = defaultProtocol
@@ -170,6 +171,19 @@ func iptablesDeleteOutput(rule Rule, destination string) error {
 		"-d", localhostAddress,
 		"-j", dnatTarget,
 		"--to-destination", destination)
+}
+
+// CheckBackend verifies that a compatible firewall backend (iptables or iptables-nft)
+// is available. Call once before any port forwarding operations to fail early.
+func CheckBackend() error {
+	backend := detectFirewallBackend()
+	switch backend {
+	case backendNftables:
+		return fmt.Errorf("this host uses nftables without iptables compatibility — install iptables-nft or configure port forwarding manually using nft")
+	case backendNone:
+		return fmt.Errorf("iptables not found — install iptables or iptables-nft for port forwarding")
+	}
+	return nil
 }
 
 // detectFirewallBackend determines which firewall tool is available on the host.
@@ -256,6 +270,7 @@ func containsProtocol(fields []string, protocol string) bool {
 	return false
 }
 
+// runIptables executes an iptables command with sudo and streams output to the UI.
 func runIptables(args ...string) error {
 	cmd := exec.Command("sudo", append([]string{iptablesCommand}, args...)...)
 	cmd.Stdout = ui.Stdout()

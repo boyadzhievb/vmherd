@@ -20,31 +20,32 @@ func GenerateMACAddress() (string, error) {
 
 // SharedFolderMount describes a host directory shared with the guest via 9p virtio.
 type SharedFolderMount struct {
-	HostPath  string
-	GuestPath string
-	MountTag  string
+	HostPath  string // absolute path on the host
+	GuestPath string // absolute mount path inside the guest
+	MountTag  string // 9p mount tag for virtio passthrough
 }
 
 // CreateOptions holds everything needed to create a VM via virt-install.
 type CreateOptions struct {
-	DomainName         string
-	DiskPath           string
-	CloudInitUserData  string
-	CloudInitMetaData  string
-	CloudInitNetConfig string
-	NetworkName        string
-	MACAddress         string
-	Memory             int
-	CPUs               int
-	OSVariant          string
-	ImagePath          string
-	DiskSize           string
-	SharedFolders      []SharedFolderMount
+	VMName             string              // human-readable name from the Herdfile
+	DomainName         string              // libvirt domain name (project-scoped)
+	DiskPath           string              // path to the VM's qcow2 disk image
+	CloudInitUserData  string              // path to cloud-init user-data file
+	CloudInitMetaData  string              // path to cloud-init meta-data file
+	CloudInitNetConfig string              // path to cloud-init network-config file
+	NetworkName        string              // libvirt network to attach the VM to
+	MACAddress         string              // assigned MAC address
+	Memory             int                 // RAM in megabytes
+	CPUs               int                 // virtual CPU count
+	OSVariant          string              // virt-install os-variant hint
+	ImagePath          string              // path to the backing cloud image
+	DiskSize           string              // disk size with unit (e.g. 20G)
+	SharedFolders      []SharedFolderMount // 9p host-to-guest directory mounts
 }
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
 func Create(opts CreateOptions) error {
-	if err := checkDiskPathAvailable(opts.DiskPath, opts.DomainName); err != nil {
+	if err := checkDiskPathAvailable(opts.DiskPath, opts.VMName); err != nil {
 		return err
 	}
 
@@ -82,6 +83,7 @@ func Create(opts CreateOptions) error {
 	cmd.Stderr = ui.Stderr()
 
 	if err := cmd.Run(); err != nil {
+		_ = exec.Command("sudo", "unlink", opts.DiskPath).Run()
 		return fmt.Errorf("virt-install failed for %s: %w — check that libvirtd is running and you have permission", opts.DomainName, err)
 	}
 
@@ -143,16 +145,17 @@ func State(domainName string) string {
 // checkDiskPathAvailable verifies that no file already exists at the target disk
 // path. An existing file likely belongs to a stale or orphaned VM and should not
 // be silently overwritten.
-func checkDiskPathAvailable(diskPath, domainName string) error {
+func checkDiskPathAvailable(diskPath, vmName string) error {
 	cmd := exec.Command("sudo", "test", "-e", diskPath)
 	if cmd.Run() == nil {
 		return fmt.Errorf("disk %s already exists — it may belong to a previous VM. "+
 			"Run 'vmherd destroy %s' to clean up, or remove the file manually with: sudo rm %s",
-			diskPath, domainName, diskPath)
+			diskPath, vmName, diskPath)
 	}
 	return nil
 }
 
+// createDisk creates a copy-on-write qcow2 disk backed by the cloud image.
 func createDisk(diskPath, backingImage, diskSize string) error {
 	cmd := exec.Command("sudo", "qemu-img", "create",
 		"-f", "qcow2",
@@ -169,6 +172,7 @@ func createDisk(diskPath, backingImage, diskSize string) error {
 	return nil
 }
 
+// virsh runs a virsh subcommand with sudo and streams output to the UI.
 func virsh(args ...string) error {
 	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
 	cmd.Stdout = ui.Stdout()

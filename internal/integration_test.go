@@ -88,6 +88,7 @@ func TestFullVMLifecycle(t *testing.T) {
 	testMACAddress := "52:54:00:aa:bb:cc"
 
 	if err := vm.Create(vm.CreateOptions{
+		VMName:             vmConfig.Name,
 		DomainName:         testDomainName,
 		DiskPath:           diskPath,
 		CloudInitUserData:  ciFiles.UserData,

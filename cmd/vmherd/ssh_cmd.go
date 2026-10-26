@@ -5,6 +5,7 @@ import (
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
+	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +30,11 @@ func newSSHCmd() *cobra.Command {
 
 			if targetVM.Network.IP == "" {
 				return fmt.Errorf("VM %q has no IP address configured", vmName)
+			}
+
+			domainName := project.DomainName(targetVM.Name)
+			if vm.State(domainName) != "running" {
+				return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmName, vmName)
 			}
 
 			keyPath := project.SSHKeyPath()

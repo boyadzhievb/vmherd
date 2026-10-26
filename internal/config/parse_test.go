@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -77,7 +79,7 @@ vms:
   - name: minimal
     image: debian:bookworm
     network:
-      ip: 10.0.0.5
+      ip: 192.168.122.5
 `
 	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
 		t.Fatal(err)
@@ -181,7 +183,7 @@ vms:
   - name: web
     image: ubuntu:noble
     network:
-      ip: 10.0.0.5
+      ip: 192.168.122.5
 `
 	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
 		t.Fatal(err)
@@ -423,5 +425,347 @@ func TestFilterVMs(t *testing.T) {
 	_, err = FilterVMs(hf, []string{"nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for unknown VM name")
+	}
+}
+
+func TestValidateVMNameSpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: ";rm -rf /"
+    image: ubuntu:noble
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for VM name with special characters")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected error to mention 'invalid', got: %v", err)
+	}
+}
+
+func TestValidateVMNameTooLong(t *testing.T) {
+	dir := t.TempDir()
+	longName := strings.Repeat("a", 64)
+	herdfile := fmt.Sprintf(`
+vms:
+  - name: %s
+    image: ubuntu:noble
+`, longName)
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for VM name exceeding 63 characters")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected error to mention 'invalid', got: %v", err)
+	}
+}
+
+func TestValidateVMNameStartsWithHyphen(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: -bad
+    image: ubuntu:noble
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for VM name starting with hyphen")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected error to mention 'invalid', got: %v", err)
+	}
+}
+
+func TestValidateVMNameValid(t *testing.T) {
+	validNames := []string{"ctrl", "worker-1", "a"}
+	for _, name := range validNames {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			herdfile := fmt.Sprintf(`
+vms:
+  - name: %s
+    image: ubuntu:noble
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`, name)
+			if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err != nil {
+				t.Fatalf("valid VM name %q should not produce error, got: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestValidateNetworkNameSpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+network:
+  name: "</name>"
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for network name with XML injection characters")
+	}
+	if !strings.Contains(err.Error(), "network name") {
+		t.Errorf("expected error about network name, got: %v", err)
+	}
+}
+
+func TestValidateIPAddressInvalid(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: not-an-ip
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid IP address")
+	}
+	if !strings.Contains(err.Error(), "not a valid IPv4") {
+		t.Errorf("expected error about invalid IPv4, got: %v", err)
+	}
+}
+
+func TestValidateIPAddressDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 192.168.122.10
+  - name: api
+    image: ubuntu:noble
+    network:
+      ip: 192.168.122.10
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for duplicate IP address across VMs")
+	}
+	if !strings.Contains(err.Error(), "already used by VM") {
+		t.Errorf("expected error about duplicate IP, got: %v", err)
+	}
+}
+
+func TestValidateIPOutsideSubnet(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 192.168.1.5
+network:
+  name: test-net
+  subnet: 10.0.0.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for IP outside network subnet")
+	}
+	if !strings.Contains(err.Error(), "outside the network subnet") {
+		t.Errorf("expected error about IP outside subnet, got: %v", err)
+	}
+}
+
+func TestValidateDiskSizeInvalid(t *testing.T) {
+	invalidSizes := []struct {
+		size string
+		desc string
+	}{
+		{"20X", "invalid unit suffix"},
+		{"abc", "non-numeric value"},
+	}
+	for _, tc := range invalidSizes {
+		t.Run(tc.desc, func(t *testing.T) {
+			dir := t.TempDir()
+			herdfile := fmt.Sprintf(`
+vms:
+  - name: web
+    image: ubuntu:noble
+    disk: %s
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`, tc.size)
+			if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatalf("expected error for invalid disk size %q", tc.size)
+			}
+			if !strings.Contains(err.Error(), "disk size") {
+				t.Errorf("expected error about disk size, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateDiskSizeValid(t *testing.T) {
+	validSizes := []string{"20G", "100M", "1T"}
+	for _, size := range validSizes {
+		t.Run(size, func(t *testing.T) {
+			dir := t.TempDir()
+			herdfile := fmt.Sprintf(`
+vms:
+  - name: web
+    image: ubuntu:noble
+    disk: %s
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`, size)
+			if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err != nil {
+				t.Fatalf("valid disk size %q should not produce error, got: %v", size, err)
+			}
+		})
+	}
+}
+
+func TestValidateSharedFolderPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    shared_folders:
+      - host: /etc/shadow
+        guest: /mnt/data
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for shared folder pointing to /etc/shadow")
+	}
+	if !strings.Contains(err.Error(), "forbidden system directory") {
+		t.Errorf("expected error about forbidden system directory, got: %v", err)
+	}
+}
+
+func TestValidateSharedFolderRelativeTraversal(t *testing.T) {
+	dir := t.TempDir()
+	// Use enough ../ segments to reach the filesystem root from any temp directory depth.
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    shared_folders:
+      - host: ../../../../../../../../../../../../etc/shadow
+        guest: /mnt/data
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for shared folder with path traversal to /etc/shadow")
+	}
+	if !strings.Contains(err.Error(), "forbidden system directory") {
+		t.Errorf("expected error about forbidden system directory, got: %v", err)
+	}
+}
+
+func TestValidateProvisionSourceAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    provision:
+      - type: file
+        source: /etc/shadow
+        destination: /tmp/shadow
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for absolute provision source path")
+	}
+	if !strings.Contains(err.Error(), "must be a relative path") {
+		t.Errorf("expected error about relative path requirement, got: %v", err)
+	}
+}
+
+func TestValidateProvisionSourceTraversal(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    provision:
+      - type: file
+        source: ../../../etc/passwd
+        destination: /tmp/passwd
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for provision source escaping project directory")
+	}
+	if !strings.Contains(err.Error(), "escapes project directory") {
+		t.Errorf("expected error about escaping project directory, got: %v", err)
 	}
 }

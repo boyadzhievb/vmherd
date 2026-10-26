@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -34,6 +35,12 @@ Examples:
 			vmsToRestart, err := config.FilterVMs(project.Herdfile, args)
 			if err != nil {
 				return err
+			}
+
+			if hasPortForwards(vmsToRestart) {
+				if err := portfwd.CheckBackend(); err != nil {
+					return err
+				}
 			}
 
 			keyPath, err := ssh.EnsureKeyPair(project.StateDir, "vmherd-"+project.Name)

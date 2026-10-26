@@ -203,6 +203,7 @@ func Destroy(networkName string) error {
 	return nil
 }
 
+// exists checks whether a libvirt network with the given name is defined.
 func exists(networkName string) bool {
 	out, err := exec.Command("sudo", "virsh", "net-list", "--all", "--name").Output()
 	if err != nil {
@@ -216,6 +217,7 @@ func exists(networkName string) bool {
 	return false
 }
 
+// isActive checks whether a libvirt network is currently started.
 func isActive(networkName string) bool {
 	out, err := exec.Command("sudo", "virsh", "net-list", "--name").Output()
 	if err != nil {
@@ -229,6 +231,7 @@ func isActive(networkName string) bool {
 	return false
 }
 
+// virsh runs a virsh subcommand with sudo and streams output to the UI.
 func virsh(args ...string) error {
 	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
 	cmd.Stdout = ui.Stdout()

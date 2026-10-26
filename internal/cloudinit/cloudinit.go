@@ -13,21 +13,21 @@ import (
 
 // Files holds the paths to generated cloud-init configuration files.
 type Files struct {
-	UserData      string
-	MetaData      string
-	NetworkConfig string
+	UserData      string // path to the user-data file
+	MetaData      string // path to the meta-data file
+	NetworkConfig string // path to the network-config file
 }
 
 // SharedMount describes a 9p mount to configure in cloud-init.
 type SharedMount struct {
-	MountTag  string
-	GuestPath string
+	MountTag  string // 9p mount tag matching the virtio device
+	GuestPath string // absolute mount path inside the guest
 }
 
 // GenerateFiles creates the cloud-init configuration files for a VM.
 func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer, macAddress string, sharedMounts []SharedMount) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
-	if err := os.MkdirAll(seedDir, 0o755); err != nil {
+	if err := os.MkdirAll(seedDir, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
 	}
 
@@ -53,6 +53,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKe
 	}, nil
 }
 
+// writeUserData generates the cloud-init user-data file with users, packages, and provisioning.
 func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKey string, sharedMounts []SharedMount) error {
 	var builder strings.Builder
 	builder.WriteString("#cloud-config\n")
@@ -109,8 +110,11 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 		if len(runcmds) > 0 {
 			builder.WriteString("runcmd:\n")
 			for _, cmd := range runcmds {
-				for _, line := range strings.Split(strings.TrimSpace(cmd), "\n") {
-					fmt.Fprintf(&builder, "  - %s\n", line)
+				trimmedCommand := strings.TrimSpace(cmd)
+				if strings.Contains(trimmedCommand, "\n") {
+					fmt.Fprintf(&builder, "  - [\"/bin/bash\", \"-c\", %q]\n", trimmedCommand)
+				} else {
+					fmt.Fprintf(&builder, "  - %s\n", trimmedCommand)
 				}
 			}
 		}
@@ -130,9 +134,10 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 		}
 	}
 
-	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o644)
+	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o600)
 }
 
+// writeNetworkConfig generates the cloud-init network-config file for static IP assignment.
 func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer, macAddress string) error {
 	content := fmt.Sprintf(`version: 2
 ethernets:
@@ -150,12 +155,13 @@ ethernets:
         - %s
 `, macAddress, ipAddress, gateway, dnsServer)
 
-	return os.WriteFile(filepath.Join(seedDir, "network-config"), []byte(content), 0o644)
+	return os.WriteFile(filepath.Join(seedDir, "network-config"), []byte(content), 0o600)
 }
 
+// writeMetaData generates the cloud-init meta-data file with instance identity.
 func writeMetaData(seedDir, vmName string) error {
 	content := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmName, vmName)
-	return os.WriteFile(filepath.Join(seedDir, "meta-data"), []byte(content), 0o644)
+	return os.WriteFile(filepath.Join(seedDir, "meta-data"), []byte(content), 0o600)
 }
 
 // hashPassword generates a SHA-512 password hash using openssl.

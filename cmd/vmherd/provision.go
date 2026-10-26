@@ -123,7 +123,7 @@ func provisionFileStep(keyPath, sshUser string, vmConfig config.VM, step config.
 		return fmt.Errorf("VM %q: file copy step %d failed: %w — check that %s exists", vmConfig.Name, stepNumber, err, step.Source)
 	}
 
-	chmodCommand := []string{"chmod", "755", step.Destination}
+	chmodCommand := []string{"chmod", "0644", step.Destination}
 	if err := ssh.Connect(keyPath, sshUser, vmConfig.Network.IP, chmodCommand); err != nil {
 		ui.Println(" chmod failed")
 		return fmt.Errorf("VM %q: cannot set permissions on %s: %w", vmConfig.Name, step.Destination, err)

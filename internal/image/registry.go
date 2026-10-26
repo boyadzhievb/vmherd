@@ -7,13 +7,13 @@ import (
 
 // Entry describes a cloud image available in the built-in registry.
 type Entry struct {
-	Distro      string
-	Codename    string
-	Description string
-	ImageURL    string
-	ChecksumURL string
-	Filename    string
-	OSVariant   string
+	Distro      string // vendor name (e.g. ubuntu, debian)
+	Codename    string // release codename or version (e.g. noble, 41)
+	Description string // human-readable label for display
+	ImageURL    string // HTTPS URL to the qcow2 cloud image
+	ChecksumURL string // HTTPS URL to the vendor checksum file
+	Filename    string // image filename used to match checksum entries
+	OSVariant   string // virt-install os-variant hint
 }
 
 // Resolve looks up a distro:codename image spec in the built-in registry.

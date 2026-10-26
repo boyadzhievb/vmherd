@@ -18,8 +18,13 @@ func EnsureKeyPair(stateDir, comment string) (string, error) {
 		return keyPath, nil
 	}
 
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", fmt.Errorf("cannot create state directory %s: %w", stateDir, err)
+	}
+
+	// Tighten permissions even if the directory already existed with a looser mode.
+	if err := os.Chmod(stateDir, 0o700); err != nil {
+		return "", fmt.Errorf("cannot set permissions on state directory %s: %w", stateDir, err)
 	}
 
 	cmd := exec.Command("ssh-keygen",
@@ -34,6 +39,11 @@ func EnsureKeyPair(stateDir, comment string) (string, error) {
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("cannot generate SSH key: %w", err)
+	}
+
+	// Explicitly set private key permissions to owner-only, in case umask is too permissive.
+	if err := os.Chmod(keyPath, 0o600); err != nil {
+		return "", fmt.Errorf("cannot set permissions on private key %s: %w", keyPath, err)
 	}
 
 	ui.Printf("SSH key generated: %s\n", keyPath)

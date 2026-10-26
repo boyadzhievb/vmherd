@@ -10,6 +10,7 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/network"
+	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -39,6 +40,12 @@ func newUpCmd() *cobra.Command {
 			vms, err := config.FilterVMs(project.Herdfile, args)
 			if err != nil {
 				return err
+			}
+
+			if hasPortForwards(vms) {
+				if err := portfwd.CheckBackend(); err != nil {
+					return err
+				}
 			}
 
 			subnetBase, err := project.SubnetBase()
@@ -234,6 +241,7 @@ func createSingleVM(
 	}
 
 	if err := vm.Create(vm.CreateOptions{
+		VMName:             vmConfig.Name,
 		DomainName:         domainName,
 		DiskPath:           project.DiskPath(vmConfig.Name),
 		CloudInitUserData:  ciFiles.UserData,

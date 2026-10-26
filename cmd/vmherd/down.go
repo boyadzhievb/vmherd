@@ -37,7 +37,9 @@ func newDownCmd() *cobra.Command {
 
 				ui.Printf("Stopping %s...\n", vmConfig.Name)
 				teardownPortForwarding(vmConfig)
-				_ = vm.Shutdown(domainName)
+				if err := vm.Shutdown(domainName); err != nil {
+					ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
+				}
 			}
 
 			time.Sleep(gracefulShutdownWait)
@@ -46,7 +48,9 @@ func newDownCmd() *cobra.Command {
 				domainName := project.DomainName(vmConfig.Name)
 				if vm.State(domainName) == "running" {
 					ui.Printf("Force-stopping %s...\n", vmConfig.Name)
-					_ = vm.ForceStop(domainName)
+					if err := vm.ForceStop(domainName); err != nil {
+						ui.Printf("Warning: force-stop failed for %s: %v\n", vmConfig.Name, err)
+					}
 				}
 			}
 

@@ -6,6 +6,16 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
+// hasPortForwards returns true if any VM in the list has port forward rules configured.
+func hasPortForwards(vms []config.VM) bool {
+	for _, vmConfig := range vms {
+		if len(vmConfig.Ports) > 0 && vmConfig.Network.IP != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // setupPortForwarding configures iptables DNAT rules for a VM's port forwards.
 func setupPortForwarding(vmConfig config.VM) {
 	if len(vmConfig.Ports) == 0 || vmConfig.Network.IP == "" {

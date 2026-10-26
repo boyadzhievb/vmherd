@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
@@ -24,7 +26,12 @@ func newStatusCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(writer, "NAME\tIMAGE\tIP\tSTATE")
 			_, _ = fmt.Fprintln(writer, "----\t-----\t--\t-----")
 
-			for _, vmConfig := range project.Herdfile.VMs {
+			sortedVMs := slices.Clone(project.Herdfile.VMs)
+			slices.SortFunc(sortedVMs, func(a, b config.VM) int {
+				return strings.Compare(a.Name, b.Name)
+			})
+
+			for _, vmConfig := range sortedVMs {
 				domainName := project.DomainName(vmConfig.Name)
 				state := vm.State(domainName)
 

@@ -190,25 +190,60 @@ func TestIsCachedMissing(t *testing.T) {
 	}
 }
 
-// TestSha256File verifies that sha256File returns the correct hex digest for known content.
-func TestSha256File(t *testing.T) {
+// TestCleanStaleTempFiles verifies that leftover .tmp files are removed from the cache directory.
+func TestCleanStaleTempFiles(t *testing.T) {
 	tempDir := t.TempDir()
-	testFilePath := filepath.Join(tempDir, "testfile.txt")
 
-	knownContent := []byte("hello")
-	// SHA256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-	expectedSHA256 := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-
-	if err := os.WriteFile(testFilePath, knownContent, 0o644); err != nil {
-		t.Fatalf("cannot write temp file: %v", err)
+	staleTmpPath := filepath.Join(tempDir, "ubuntu-noble-image.qcow2.tmp")
+	if err := os.WriteFile(staleTmpPath, []byte("stale partial download"), 0o644); err != nil {
+		t.Fatalf("cannot create stale .tmp file: %v", err)
 	}
 
-	actualHash, err := sha256File(testFilePath)
-	if err != nil {
-		t.Fatalf("sha256File returned unexpected error: %v", err)
+	// Create a real cached file that should NOT be removed.
+	realImagePath := filepath.Join(tempDir, "ubuntu-noble-image.qcow2")
+	if err := os.WriteFile(realImagePath, []byte("real image"), 0o644); err != nil {
+		t.Fatalf("cannot create real image file: %v", err)
 	}
 
-	if actualHash != expectedSHA256 {
-		t.Errorf("sha256File hash mismatch:\n  expected: %s\n  got:      %s", expectedSHA256, actualHash)
+	cleanStaleTempFiles(tempDir)
+
+	if _, err := os.Stat(staleTmpPath); !os.IsNotExist(err) {
+		t.Errorf("stale .tmp file should have been removed, but still exists: %s", staleTmpPath)
+	}
+
+	if _, err := os.Stat(realImagePath); err != nil {
+		t.Errorf("real image file should not have been removed: %v", err)
+	}
+}
+
+// TestCleanStaleTempFilesEmptyDir verifies that cleanup is a no-op on an empty directory.
+func TestCleanStaleTempFilesEmptyDir(t *testing.T) {
+	tempDir := t.TempDir()
+	// Should not panic or error on empty directory.
+	cleanStaleTempFiles(tempDir)
+}
+
+// TestDownloadFileRejectsNonHTTPS verifies that downloadFile refuses non-HTTPS URLs.
+func TestDownloadFileRejectsNonHTTPS(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"plain HTTP", "http://example.com/image.qcow2"},
+		{"FTP", "ftp://example.com/image.qcow2"},
+		{"empty URL", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destPath := filepath.Join(t.TempDir(), "output.qcow2")
+			_, err := downloadFile(tt.url, destPath)
+			if err == nil {
+				t.Fatalf("expected error for non-HTTPS URL %q, got nil", tt.url)
+			}
+			if !strings.Contains(err.Error(), "non-HTTPS") {
+				t.Errorf("error should mention non-HTTPS, got: %v", err)
+			}
+		})
 	}
 }

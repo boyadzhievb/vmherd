@@ -3,6 +3,7 @@ package ssh
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // TestSSHBaseArgs verifies that sshBaseArgs produces the correct SSH arguments
@@ -41,5 +42,58 @@ func TestSSHBaseArgs(t *testing.T) {
 	lastArg := args[len(args)-1]
 	if lastArg != expectedUserHost {
 		t.Errorf("last arg = %q, want %q", lastArg, expectedUserHost)
+	}
+}
+
+// TestExponentialBackoffConstants verifies that the retry interval constants
+// form a valid exponential backoff configuration.
+func TestExponentialBackoffConstants(t *testing.T) {
+	if initialRetryInterval <= 0 {
+		t.Errorf("initialRetryInterval = %s, must be positive", initialRetryInterval)
+	}
+	if maxRetryInterval < initialRetryInterval {
+		t.Errorf("maxRetryInterval (%s) must be >= initialRetryInterval (%s)",
+			maxRetryInterval, initialRetryInterval)
+	}
+	if defaultWaitTimeout < maxRetryInterval {
+		t.Errorf("defaultWaitTimeout (%s) must be >= maxRetryInterval (%s)",
+			defaultWaitTimeout, maxRetryInterval)
+	}
+
+	// Simulate the backoff sequence and ensure it converges to the cap.
+	currentInterval := initialRetryInterval
+	for i := 0; i < 10; i++ {
+		currentInterval *= 2
+		if currentInterval > maxRetryInterval {
+			currentInterval = maxRetryInterval
+		}
+	}
+	if currentInterval != maxRetryInterval {
+		t.Errorf("backoff did not converge to cap: got %s, want %s",
+			currentInterval, maxRetryInterval)
+	}
+}
+
+// TestBackoffSequenceValues verifies the exact sequence of intervals
+// produced by the exponential backoff logic.
+func TestBackoffSequenceValues(t *testing.T) {
+	expectedSequence := []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		16 * time.Second, // capped
+	}
+
+	currentInterval := initialRetryInterval
+	for i, expected := range expectedSequence {
+		if currentInterval != expected {
+			t.Errorf("step %d: interval = %s, want %s", i, currentInterval, expected)
+		}
+		currentInterval *= 2
+		if currentInterval > maxRetryInterval {
+			currentInterval = maxRetryInterval
+		}
 	}
 }

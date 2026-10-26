@@ -10,6 +10,7 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/network"
+	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -38,6 +39,12 @@ Examples:
 			vmsToReload, err := config.FilterVMs(project.Herdfile, args)
 			if err != nil {
 				return err
+			}
+
+			if hasPortForwards(vmsToReload) {
+				if err := portfwd.CheckBackend(); err != nil {
+					return err
+				}
 			}
 
 			subnetBase, err := project.SubnetBase()
@@ -163,6 +170,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 	}
 
 	if err := vm.Create(vm.CreateOptions{
+		VMName:             vmConfig.Name,
 		DomainName:         domainName,
 		DiskPath:           project.DiskPath(vmConfig.Name),
 		CloudInitUserData:  ciFiles.UserData,

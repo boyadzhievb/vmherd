@@ -26,7 +26,9 @@ func IsCached(entry *Entry) bool {
 }
 
 // EnsureCached downloads and verifies the image if not already cached.
+// Cleans up stale .tmp files from interrupted downloads before proceeding.
 func EnsureCached(entry *Entry) (string, error) {
+	cleanStaleTempFiles(config.ImageCacheDir())
 	cachedPath := CachedPath(entry)
 	if IsCached(entry) {
 		return cachedPath, nil
@@ -35,6 +37,8 @@ func EnsureCached(entry *Entry) (string, error) {
 }
 
 // Download fetches the cloud image and verifies its SHA256 checksum.
+// The checksum is computed during download using streaming hash verification,
+// avoiding a second read pass over multi-GB images.
 func Download(entry *Entry) (string, error) {
 	cacheDir := config.ImageCacheDir()
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
@@ -45,7 +49,8 @@ func Download(entry *Entry) (string, error) {
 	tmpPath := cachedPath + ".tmp"
 
 	ui.Printf("Downloading %s (%s)...\n", entry.Description, entry.Distro+":"+entry.Codename)
-	if err := downloadFile(entry.ImageURL, tmpPath); err != nil {
+	actualHash, err := downloadFile(entry.ImageURL, tmpPath)
+	if err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("download failed for %s: %w", entry.Description, err)
 	}
@@ -55,12 +60,6 @@ func Download(entry *Entry) (string, error) {
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("cannot verify checksum for %s: %w", entry.Description, err)
-	}
-
-	actualHash, err := sha256File(tmpPath)
-	if err != nil {
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("cannot compute checksum: %w", err)
 	}
 
 	if actualHash != expectedHash {
@@ -78,20 +77,26 @@ func Download(entry *Entry) (string, error) {
 	return cachedPath, nil
 }
 
-func downloadFile(url, destPath string) error {
-	resp, err := http.Get(url) //nolint:gosec // URLs come from the built-in registry, not user input
+// downloadFile fetches a URL to destPath, computing a SHA256 hash during download.
+// Returns the hex-encoded SHA256 digest of the downloaded content.
+func downloadFile(imageURL, destPath string) (string, error) {
+	if !strings.HasPrefix(imageURL, "https://") {
+		return "", fmt.Errorf("refusing to download from non-HTTPS URL: %s — all image URLs must use HTTPS", imageURL)
+	}
+
+	resp, err := http.Get(imageURL) //nolint:noctx // URLs come from the built-in registry, not user input
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		return "", fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, imageURL)
 	}
 
 	out, err := os.Create(destPath)
 	if err != nil {
-		return fmt.Errorf("cannot create %s: %w", destPath, err)
+		return "", fmt.Errorf("cannot create %s: %w", destPath, err)
 	}
 	defer func() { _ = out.Close() }()
 
@@ -103,15 +108,30 @@ func downloadFile(url, destPath string) error {
 		}
 	}
 
-	if _, err := io.Copy(out, reader); err != nil {
-		return fmt.Errorf("download interrupted: %w", err)
+	hasher := sha256.New()
+	teeReader := io.TeeReader(reader, hasher)
+
+	if _, err := io.Copy(out, teeReader); err != nil {
+		return "", fmt.Errorf("download interrupted: %w", err)
 	}
 
 	if !ui.IsQuiet() && resp.ContentLength > 0 {
 		fmt.Println()
 	}
 
-	return nil
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// cleanStaleTempFiles removes leftover .tmp files from interrupted downloads.
+func cleanStaleTempFiles(cacheDir string) {
+	matches, err := filepath.Glob(filepath.Join(cacheDir, "*.tmp"))
+	if err != nil {
+		return
+	}
+	for _, staleFile := range matches {
+		ui.Printf("Removing stale download: %s\n", filepath.Base(staleFile))
+		_ = os.Remove(staleFile)
+	}
 }
 
 type progressReader struct {
@@ -121,6 +141,7 @@ type progressReader struct {
 	lastPct int
 }
 
+// Read wraps the underlying reader and prints download progress to stdout.
 func (pr *progressReader) Read(p []byte) (int, error) {
 	n, err := pr.reader.Read(p)
 	pr.current += int64(n)
@@ -132,6 +153,7 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// fetchExpectedChecksum downloads the vendor checksum file and extracts the expected hash.
 func fetchExpectedChecksum(entry *Entry) (string, error) {
 	resp, err := http.Get(entry.ChecksumURL) //nolint:gosec // URLs come from the built-in registry
 	if err != nil {
@@ -185,18 +207,4 @@ func parseChecksum(content, filename string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no SHA256 hash found for %q in checksum file", filename)
-}
-
-func sha256File(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = file.Close() }()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
