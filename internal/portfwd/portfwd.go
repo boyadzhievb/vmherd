@@ -5,6 +5,7 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
@@ -19,6 +20,11 @@ const (
 	minPort          = 1
 	maxPort          = 65535
 	defaultProtocol  = "tcp"
+
+	backendIptables    = "iptables"
+	backendIptablesNft = "iptables-nft"
+	backendNftables    = "nftables"
+	backendNone        = "none"
 )
 
 // Rule describes a single port-forwarding mapping from a host port to a guest port.
@@ -31,9 +37,27 @@ type Rule struct {
 
 // Setup installs iptables DNAT rules so traffic to host ports reaches guest VMs.
 // Both PREROUTING (external traffic) and OUTPUT (localhost traffic) chains are configured.
+// Checks for firewall backend compatibility and existing NAT rule conflicts first.
 func Setup(rules []Rule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+
+	firewallBackend := detectFirewallBackend()
+	switch firewallBackend {
+	case backendNftables:
+		return fmt.Errorf("this host uses nftables without iptables compatibility — install iptables-nft or configure port forwarding manually using nft")
+	case backendNone:
+		return fmt.Errorf("iptables not found — install iptables or iptables-nft for port forwarding")
+	}
+
 	for _, rule := range rules {
 		normalizedRule := normalizeProtocol(rule)
+
+		if err := CheckExistingNATRule(normalizedRule.HostPort, normalizedRule.Protocol); err != nil {
+			return err
+		}
+
 		destination := net.JoinHostPort(normalizedRule.GuestIP, strconv.Itoa(normalizedRule.GuestPort))
 
 		if err := iptablesAppend(preroutingChain, normalizedRule, destination); err != nil {
@@ -146,6 +170,90 @@ func iptablesDeleteOutput(rule Rule, destination string) error {
 		"-d", localhostAddress,
 		"-j", dnatTarget,
 		"--to-destination", destination)
+}
+
+// detectFirewallBackend determines which firewall tool is available on the host.
+// Returns backendIptables, backendIptablesNft, backendNftables, or backendNone.
+func detectFirewallBackend() string {
+	versionOutput, err := exec.Command(iptablesCommand, "--version").CombinedOutput()
+	if err == nil {
+		versionString := string(versionOutput)
+		if strings.Contains(versionString, "nf_tables") {
+			return backendIptablesNft
+		}
+		return backendIptables
+	}
+
+	if _, lookupErr := exec.LookPath("nft"); lookupErr == nil {
+		return backendNftables
+	}
+
+	return backendNone
+}
+
+// CheckExistingNATRule checks whether an iptables NAT PREROUTING rule already
+// exists for the given host port and protocol. Returns an actionable error if
+// a conflicting rule is found. Returns nil if iptables cannot be queried.
+func CheckExistingNATRule(hostPort int, protocol string) error {
+	if protocol == "" {
+		protocol = defaultProtocol
+	}
+
+	listOutput, err := exec.Command("sudo", iptablesCommand,
+		"-t", natTable, "-L", preroutingChain, "-n").CombinedOutput()
+	if err != nil {
+		return nil
+	}
+
+	if existingNATRuleConflicts(string(listOutput), hostPort, protocol) {
+		return fmt.Errorf("host port %d/%s already has a NAT rule — another VM or service (e.g. Docker, libvirt) may be using it. Remove the conflicting rule or choose a different host port",
+			hostPort, protocol)
+	}
+
+	return nil
+}
+
+// existingNATRuleConflicts parses iptables NAT listing output and returns true
+// if an existing rule targets the given host port and protocol.
+func existingNATRuleConflicts(iptablesOutput string, hostPort int, protocol string) bool {
+	portToken := fmt.Sprintf("dpt:%d", hostPort)
+
+	for _, line := range strings.Split(iptablesOutput, "\n") {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "Chain") || strings.HasPrefix(trimmedLine, "num") || strings.HasPrefix(trimmedLine, "target") {
+			continue
+		}
+
+		if !strings.Contains(trimmedLine, portToken) {
+			continue
+		}
+
+		tokenEndIndex := strings.Index(trimmedLine, portToken) + len(portToken)
+		if tokenEndIndex < len(trimmedLine) {
+			nextChar := trimmedLine[tokenEndIndex]
+			if nextChar >= '0' && nextChar <= '9' {
+				continue
+			}
+		}
+
+		lineFields := strings.Fields(trimmedLine)
+		if containsProtocol(lineFields, protocol) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// containsProtocol checks whether any field in the iptables output line matches
+// the given protocol. Handles both numbered and unnumbered output formats.
+func containsProtocol(fields []string, protocol string) bool {
+	for _, field := range fields {
+		if strings.EqualFold(field, protocol) {
+			return true
+		}
+	}
+	return false
 }
 
 func runIptables(args ...string) error {

@@ -27,6 +27,7 @@
 vmherd init                    # create example Herdfile in current directory
 vmherd up [name...]            # create and start VMs (all or named)
 vmherd down [name...]          # stop VMs gracefully
+vmherd restart [name...]       # stop and start VMs (preserves disk)
 vmherd destroy [name...]       # stop and remove VMs + disks
 vmherd status                  # show VM states in table format
 vmherd ssh <name> [-- cmd]     # SSH into a VM or run command

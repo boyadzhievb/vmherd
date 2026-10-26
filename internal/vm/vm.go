@@ -44,6 +44,10 @@ type CreateOptions struct {
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
 func Create(opts CreateOptions) error {
+	if err := checkDiskPathAvailable(opts.DiskPath, opts.DomainName); err != nil {
+		return err
+	}
+
 	if err := createDisk(opts.DiskPath, opts.ImagePath, opts.DiskSize); err != nil {
 		return err
 	}
@@ -134,6 +138,19 @@ func State(domainName string) string {
 		return "not created"
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// checkDiskPathAvailable verifies that no file already exists at the target disk
+// path. An existing file likely belongs to a stale or orphaned VM and should not
+// be silently overwritten.
+func checkDiskPathAvailable(diskPath, domainName string) error {
+	cmd := exec.Command("sudo", "test", "-e", diskPath)
+	if cmd.Run() == nil {
+		return fmt.Errorf("disk %s already exists — it may belong to a previous VM. "+
+			"Run 'vmherd destroy %s' to clean up, or remove the file manually with: sudo rm %s",
+			diskPath, domainName, diskPath)
+	}
+	return nil
 }
 
 func createDisk(diskPath, backingImage, diskSize string) error {
