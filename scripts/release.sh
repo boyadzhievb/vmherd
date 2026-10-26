@@ -9,7 +9,7 @@
 #
 # What it does:
 #   1. Validates tag format and clean working tree
-#   2. Appends changelog entry to CHANGELOG.md
+#   2. Inserts changelog entry into CHANGELOG.md
 #   3. Commits bookkeeping changes
 #   4. Creates an annotated git tag
 #   5. Prints the push command
@@ -77,7 +77,7 @@ All notable releases are documented here.
 HEADER_EOF
 fi
 
-# Build the new entry as a temp file, then insert after the --- separator.
+# Build the new entry as a temp file.
 TEMP_ENTRY=$(mktemp)
 cat > "$TEMP_ENTRY" << ENTRY_EOF
 
@@ -89,8 +89,20 @@ cat > "$TEMP_ENTRY" << ENTRY_EOF
 ENTRY_EOF
 
 # Insert after the first "---" line (after the header).
-sed -i '' "0,/^---$/{ /^---$/r ${TEMP_ENTRY}
-}" "$CHANGELOG_MD"
+# Use awk instead of sed -i for cross-platform compatibility (macOS + Linux).
+TEMP_OUTPUT=$(mktemp)
+awk -v entry_file="$TEMP_ENTRY" '
+    /^---$/ && !done {
+        print
+        while ((getline line < entry_file) > 0) print line
+        close(entry_file)
+        done = 1
+        next
+    }
+    { print }
+' "$CHANGELOG_MD" > "$TEMP_OUTPUT"
+
+mv "$TEMP_OUTPUT" "$CHANGELOG_MD"
 rm -f "$TEMP_ENTRY"
 
 # --- Commit ---
