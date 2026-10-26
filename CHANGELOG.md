@@ -4,6 +4,20 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.10
+
+**2026-10-26** — Add restart command and host collision safety checks
+
+- Add `vmherd restart` command: gracefully stop and start VMs without destroying them (preserves disk and config, unlike `reload`)
+- Detect subnet conflicts: before creating a libvirt network, check all existing networks for overlapping subnets (handles mixed prefix lengths)
+- Detect iptables NAT rule conflicts: before adding DNAT port-forward rules, check for existing rules on the same port to avoid collisions with Docker, other VMs, etc.
+- Detect firewall backend: identify iptables / iptables-nft / pure nftables and error clearly on unsupported setups
+- Detect disk path collisions: refuse to overwrite existing qcow2 files from stale or orphaned VMs
+- Detect bridge name collisions: catch when two long network names truncate to the same 15-char Linux bridge name
+- 28 new unit tests covering subnet overlap, iptables output parsing, bridge truncation, and CIDR conversion
+
+---
+
 ## v0.1.9
 
 **2026-10-25** — 9p shared folder fixes and test coverage
