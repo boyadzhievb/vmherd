@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newSSHCmd creates the 'ssh' command for connecting to a VM.
 func newSSHCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ssh <name> [-- command...]",
@@ -33,7 +34,7 @@ func newSSHCmd() *cobra.Command {
 			}
 
 			domainName := project.DomainName(targetVM.Name)
-			if vm.State(domainName) != "running" {
+			if vm.State(domainName) != vm.StateRunning {
 				return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmName, vmName)
 			}
 

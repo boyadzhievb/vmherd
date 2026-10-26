@@ -16,7 +16,7 @@ func TestVMExistsReturnsFalseForMissing(t *testing.T) {
 
 func TestVMStateReturnsNotCreatedForMissing(t *testing.T) {
 	state := State("vmherd-nonexistent-domain-xyz")
-	if state != "not created" {
+	if state != StateNotCreated {
 		t.Errorf("expected 'not created', got %q", state)
 	}
 }

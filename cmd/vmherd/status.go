@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newStatusCmd creates the 'status' command that shows VM states.
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",

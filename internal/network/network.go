@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/boyadzhievb/vmherd/internal/libvirt"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
@@ -133,11 +134,13 @@ func checkSubnetConflict(networkName, subnetBase string) error {
 func Ensure(stateDir, networkName, subnetBase string) error {
 	if exists(networkName) {
 		if !isActive(networkName) {
-			if err := virsh("net-start", networkName); err != nil {
+			if err := libvirt.Virsh("net-start", networkName); err != nil {
 				return fmt.Errorf("cannot start network %s: %w", networkName, err)
 			}
 		}
-		_ = virsh("net-autostart", networkName)
+		if err := libvirt.Virsh("net-autostart", networkName); err != nil {
+			ui.Printf("Warning: could not set autostart for network %s: %v\n", networkName, err)
+		}
 		return nil
 	}
 
@@ -170,21 +173,23 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 	}
 
 	xmlPath := filepath.Join(xmlDir, networkName+".xml")
-	if err := os.WriteFile(xmlPath, []byte(netXML), 0o644); err != nil {
+	if err := os.WriteFile(xmlPath, []byte(netXML), 0o600); err != nil {
 		return fmt.Errorf("cannot write network XML: %w", err)
 	}
 
-	if err := virsh("net-define", xmlPath); err != nil {
+	if err := libvirt.Virsh("net-define", xmlPath); err != nil {
 		if !exists(networkName) {
 			return fmt.Errorf("cannot define network %s: %w — is libvirtd running?", networkName, err)
 		}
 	}
-	if err := virsh("net-start", networkName); err != nil {
+	if err := libvirt.Virsh("net-start", networkName); err != nil {
 		if !isActive(networkName) {
 			return fmt.Errorf("cannot start network %s: %w", networkName, err)
 		}
 	}
-	_ = virsh("net-autostart", networkName)
+	if err := libvirt.Virsh("net-autostart", networkName); err != nil {
+		ui.Printf("Warning: could not set autostart for network %s: %v\n", networkName, err)
+	}
 
 	ui.Printf("Network %s created.\n", networkName)
 	return nil
@@ -195,8 +200,10 @@ func Destroy(networkName string) error {
 	if !exists(networkName) {
 		return nil
 	}
-	_ = virsh("net-destroy", networkName)
-	if err := virsh("net-undefine", networkName); err != nil {
+	if err := libvirt.Virsh("net-destroy", networkName); err != nil {
+		ui.Printf("Warning: could not stop network %s: %v\n", networkName, err)
+	}
+	if err := libvirt.Virsh("net-undefine", networkName); err != nil {
 		return fmt.Errorf("cannot remove network %s: %w", networkName, err)
 	}
 	ui.Printf("Network %s removed.\n", networkName)
@@ -229,14 +236,6 @@ func isActive(networkName string) bool {
 		}
 	}
 	return false
-}
-
-// virsh runs a virsh subcommand with sudo and streams output to the UI.
-func virsh(args ...string) error {
-	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
-	cmd.Stdout = ui.Stdout()
-	cmd.Stderr = ui.Stderr()
-	return cmd.Run()
 }
 
 const maxBridgeNameLength = 15

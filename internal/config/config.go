@@ -52,10 +52,20 @@ type SSHConfig struct {
 	Password string `yaml:"password"` // optional password for the SSH user
 }
 
+// ProvisionType identifies the kind of provisioning step.
+type ProvisionType string
+
+const (
+	// ProvisionShell runs inline shell commands inside the guest.
+	ProvisionShell ProvisionType = "shell"
+	// ProvisionFile copies a file from the host into the guest.
+	ProvisionFile ProvisionType = "file"
+)
+
 // Provision defines a single provisioning step.
 type Provision struct {
-	Type        string `yaml:"type"`        // "shell" or "file"
-	Inline      string `yaml:"inline"`      // shell commands to run (shell type)
-	Source      string `yaml:"source"`      // local file path (file type)
-	Destination string `yaml:"destination"` // guest file path (file type)
+	Type        ProvisionType `yaml:"type"`        // provisioning step kind (shell or file)
+	Inline      string        `yaml:"inline"`      // shell commands to run (shell type)
+	Source      string        `yaml:"source"`      // local file path (file type)
+	Destination string        `yaml:"destination"` // guest file path (file type)
 }

@@ -142,8 +142,9 @@ func TestParseChecksumWhitespaceLines(t *testing.T) {
 	}
 }
 
-// TestParseChecksumSkipsManifest verifies that lines containing ".manifest" are ignored.
-func TestParseChecksumSkipsManifest(t *testing.T) {
+// TestParseChecksumExactMatchIgnoresManifest verifies that exact matching
+// prevents ".manifest" suffix lines from matching the base filename.
+func TestParseChecksumExactMatchIgnoresManifest(t *testing.T) {
 	contentWithManifest := `manifesthash  *noble-server-cloudimg-amd64.img.manifest
 realhash12345  *noble-server-cloudimg-amd64.img`
 
@@ -153,6 +154,73 @@ realhash12345  *noble-server-cloudimg-amd64.img`
 	}
 	if hash != "realhash12345" {
 		t.Errorf("expected realhash12345, got %s", hash)
+	}
+}
+
+// TestParseChecksumExactMatchPreventsSubstring verifies that a filename that is
+// a substring of another filename does not incorrectly match the longer name.
+func TestParseChecksumExactMatchPreventsSubstring(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		filename string
+		wantHash string
+		wantErr  bool
+	}{
+		{
+			name:     "substring filename does not match longer sha256sum entry",
+			content:  "wronghash123  *amd64-disk-kvm.img\n",
+			filename: "amd64.img",
+			wantErr:  true,
+		},
+		{
+			name:     "substring filename does not match longer BSD entry",
+			content:  "SHA256 (amd64-disk-kvm.img) = wronghash123\n",
+			filename: "amd64.img",
+			wantErr:  true,
+		},
+		{
+			name:     "exact match found among similar filenames in sha256sum format",
+			content:  "wronghash  *noble.img-kvm\ncorrecthash  *noble.img\nanotherhash  *noble.img.manifest\n",
+			filename: "noble.img",
+			wantHash: "correcthash",
+		},
+		{
+			name:     "exact match found among similar filenames in BSD format",
+			content:  "SHA256 (noble.img-kvm) = wronghash\nSHA256 (noble.img) = correcthash\nSHA256 (noble.img.manifest) = anotherhash\n",
+			filename: "noble.img",
+			wantHash: "correcthash",
+		},
+		{
+			name:     "star prefix stripped for exact comparison",
+			content:  "starhash  *cloud-image.qcow2\n",
+			filename: "cloud-image.qcow2",
+			wantHash: "starhash",
+		},
+		{
+			name:     "no star prefix still matches exactly",
+			content:  "plainhash  cloud-image.qcow2\n",
+			filename: "cloud-image.qcow2",
+			wantHash: "plainhash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hash, err := parseChecksum(tt.content, tt.filename)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error but got hash %q", hash)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if hash != tt.wantHash {
+				t.Errorf("expected hash %q, got %q", tt.wantHash, hash)
+			}
+		})
 	}
 }
 

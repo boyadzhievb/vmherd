@@ -94,39 +94,6 @@ func Teardown(rules []Rule) {
 	}
 }
 
-// CheckConflict verifies a host port is not already in use.
-// Returns an actionable error if the port is bound.
-func CheckConflict(hostPort int, protocol string) error {
-	if hostPort < minPort || hostPort > maxPort {
-		return fmt.Errorf("port %d is out of range (%d–%d)", hostPort, minPort, maxPort)
-	}
-
-	if protocol == "" {
-		protocol = defaultProtocol
-	}
-
-	address := fmt.Sprintf(":%d", hostPort)
-
-	switch protocol {
-	case "tcp":
-		listener, err := net.Listen("tcp", address)
-		if err != nil {
-			return fmt.Errorf("host port %d/%s is already in use — choose a different port or stop the process using it", hostPort, protocol)
-		}
-		_ = listener.Close()
-	case "udp":
-		packetConn, err := net.ListenPacket("udp", address)
-		if err != nil {
-			return fmt.Errorf("host port %d/%s is already in use — choose a different port or stop the process using it", hostPort, protocol)
-		}
-		_ = packetConn.Close()
-	default:
-		return fmt.Errorf("unsupported protocol %q — use 'tcp' or 'udp'", protocol)
-	}
-
-	return nil
-}
-
 // normalizeProtocol returns a copy of the rule with an empty protocol defaulted to "tcp".
 func normalizeProtocol(rule Rule) Rule {
 	if rule.Protocol == "" {

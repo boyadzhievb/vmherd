@@ -27,6 +27,7 @@ type vmCreateResult struct {
 	err      error
 }
 
+// newUpCmd creates the 'up' command that creates and starts VMs.
 func newUpCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "up [name...]",
@@ -35,6 +36,10 @@ func newUpCmd() *cobra.Command {
 			project, err := config.LoadProject()
 			if err != nil {
 				return err
+			}
+
+			if project.Herdfile.SSH.Password != "" {
+				ui.Println("Warning: Herdfile contains a plaintext password — avoid committing this file to version control")
 			}
 
 			vms, err := config.FilterVMs(project.Herdfile, args)
@@ -105,14 +110,14 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 		domainName := project.DomainName(vmConfig.Name)
 		state := vm.State(domainName)
 
-		if state == "running" {
+		if state == vm.StateRunning {
 			ui.Printf("%s is already running.\n", vmConfig.Name)
 			setupPortForwarding(vmConfig)
 			activeVMs = append(activeVMs, vmConfig)
 			continue
 		}
 
-		if state == "shut off" {
+		if state == vm.StateStopped {
 			ui.Printf("Starting %s...\n", vmConfig.Name)
 			if err := vm.Start(domainName); err != nil {
 				return nil, err

@@ -48,7 +48,7 @@ func LoadProject() (*Project, error) {
 // Falls back to the legacy .vmherd/ in-project directory if it already exists.
 func resolveStateDir(projectDir string) (string, error) {
 	if envDir := os.Getenv("VMHERD_STATE_DIR"); envDir != "" {
-		if err := os.MkdirAll(envDir, 0o755); err != nil {
+		if err := os.MkdirAll(envDir, 0o700); err != nil {
 			return "", fmt.Errorf("cannot create VMHERD_STATE_DIR %s: %w", envDir, err)
 		}
 		return envDir, nil
@@ -57,7 +57,7 @@ func resolveStateDir(projectDir string) (string, error) {
 	// If .vmherd already exists as a real directory (not a symlink), keep using
 	// it for backwards compatibility — don't move state out from under the user.
 	localDotDir := filepath.Join(projectDir, ".vmherd")
-	if info, err := os.Lstat(localDotDir); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+	if info, err := os.Lstat(localDotDir); err == nil && info.IsDir() {
 		return localDotDir, nil
 	}
 
@@ -66,7 +66,7 @@ func resolveStateDir(projectDir string) (string, error) {
 		return localDotDir, nil
 	}
 
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+	if err := os.MkdirAll(globalDir, 0o700); err != nil {
 		return localDotDir, nil
 	}
 

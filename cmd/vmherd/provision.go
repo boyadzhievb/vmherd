@@ -52,7 +52,7 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 	domainName := project.DomainName(vmConfig.Name)
 	currentState := vm.State(domainName)
 
-	if currentState != "running" {
+	if currentState != vm.StateRunning {
 		return fmt.Errorf("VM %q is not running (state: %s) — run 'vmherd up %s' first", vmConfig.Name, currentState, vmConfig.Name)
 	}
 
@@ -72,11 +72,11 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 		stepNumber := stepIndex + 1
 
 		switch step.Type {
-		case "shell":
+		case config.ProvisionShell:
 			if err := provisionShellStep(keyPath, sshUser, vmConfig, step, stepNumber, totalSteps); err != nil {
 				return err
 			}
-		case "file":
+		case config.ProvisionFile:
 			if err := provisionFileStep(keyPath, sshUser, vmConfig, step, stepNumber, totalSteps); err != nil {
 				return err
 			}

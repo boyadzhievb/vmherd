@@ -36,6 +36,10 @@ Examples:
 				return err
 			}
 
+			if project.Herdfile.SSH.Password != "" {
+				ui.Println("Warning: Herdfile contains a plaintext password — avoid committing this file to version control")
+			}
+
 			vmsToReload, err := config.FilterVMs(project.Herdfile, args)
 			if err != nil {
 				return err
@@ -117,14 +121,14 @@ func shutdownAndDestroy(domainName, vmName string) error {
 	}
 
 	currentState := vm.State(domainName)
-	if currentState == "running" {
+	if currentState == vm.StateRunning {
 		ui.Printf("Stopping %s...\n", vmName)
 		if err := vm.Shutdown(domainName); err != nil {
 			ui.Printf("Graceful shutdown failed for %s, force-stopping...\n", vmName)
 		}
 		time.Sleep(reloadShutdownWait)
 
-		if vm.State(domainName) == "running" {
+		if vm.State(domainName) == vm.StateRunning {
 			if err := vm.ForceStop(domainName); err != nil {
 				return fmt.Errorf("cannot force-stop %s before reload: %w", vmName, err)
 			}

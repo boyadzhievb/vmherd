@@ -25,6 +25,13 @@ const (
 	maxResourceNameLength = 63
 	// maxNetworkNameLength is the maximum length for network names.
 	maxNetworkNameLength = 253
+	// maxSSHUserLength is the maximum length for SSH usernames (Linux limit).
+	maxSSHUserLength = 32
+
+	// dhcpPoolStart is the first last-octet in the DHCP range (.100-.200).
+	dhcpPoolStart = 100
+	// dhcpPoolEnd is the last last-octet in the DHCP range (.100-.200).
+	dhcpPoolEnd = 200
 )
 
 // resourceNamePattern matches valid VM and network names: alphanumeric with hyphens,
@@ -33,6 +40,10 @@ var resourceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0
 
 // diskSizePattern matches valid disk size specifications: digits followed by a unit suffix.
 var diskSizePattern = regexp.MustCompile(`^[0-9]+[KMGT]$`)
+
+// sshUserPattern matches valid Linux usernames: starts with lowercase letter or underscore,
+// followed by lowercase letters, digits, hyphens, or underscores.
+var sshUserPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
 // forbiddenPathPrefixes lists system directories that shared folder host paths must not resolve into.
 var forbiddenPathPrefixes = []string{"/etc", "/root", "/var/lib", "/usr", "/bin", "/sbin", "/sys", "/proc", "/boot"}
@@ -148,10 +159,33 @@ func validate(herdfile *Herdfile, projectDir string) error {
 		}
 	}
 
+	if err := validateSubnetPrefix(herdfile.Network.Subnet); err != nil {
+		return err
+	}
+
 	if err := validateNetworkName(herdfile.Network.Name); err != nil {
 		return err
 	}
 
+	if err := validateSSHUser(herdfile.SSH.User); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSubnetPrefix ensures the subnet is a valid CIDR and uses a /24 prefix.
+// The entire codebase (network XML, cloud-init, DHCP range) assumes /24; broader
+// subnet support is planned but not yet implemented.
+func validateSubnetPrefix(subnet string) error {
+	_, subnetCIDR, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return fmt.Errorf("network subnet %q is not valid CIDR: %w", subnet, err)
+	}
+	ones, _ := subnetCIDR.Mask.Size()
+	if ones != 24 {
+		return fmt.Errorf("only /24 subnets are supported, got /%d in %q — broader subnet support is planned", ones, subnet)
+	}
 	return nil
 }
 
@@ -168,6 +202,17 @@ func isValidResourceName(name string, maxLength int) bool {
 func validateNetworkName(networkName string) error {
 	if !isValidResourceName(networkName, maxNetworkNameLength) {
 		return fmt.Errorf("network name %q is invalid — use only letters, digits, and hyphens (max 253 chars, must start and end with alphanumeric)", networkName)
+	}
+	return nil
+}
+
+// validateSSHUser checks that the SSH username is a valid Linux username.
+func validateSSHUser(user string) error {
+	if len(user) > maxSSHUserLength {
+		return fmt.Errorf("ssh.user %q exceeds maximum length of %d characters", user, maxSSHUserLength)
+	}
+	if !sshUserPattern.MatchString(user) {
+		return fmt.Errorf("ssh.user %q is invalid — must start with lowercase letter or underscore, contain only lowercase letters, digits, hyphens, and underscores", user)
 	}
 	return nil
 }
@@ -201,6 +246,13 @@ func validateVMIPAddress(vmConfig VM, subnet string, usedIPs map[string]string) 
 	}
 	if !subnetCIDR.Contains(parsedIP) {
 		return fmt.Errorf("VM %q: IP address %s is outside the network subnet %s", vmConfig.Name, vmConfig.Network.IP, subnet)
+	}
+
+	ipBytes := parsedIP.To4()
+	lastOctet := int(ipBytes[3])
+	if lastOctet >= dhcpPoolStart && lastOctet <= dhcpPoolEnd {
+		return fmt.Errorf("VM %q: IP address %s is in the DHCP pool range (.%d-.%d) — use an address outside this range to avoid collisions with DHCP leases",
+			vmConfig.Name, vmConfig.Network.IP, dhcpPoolStart, dhcpPoolEnd)
 	}
 
 	usedIPs[vmConfig.Network.IP] = vmConfig.Name
@@ -252,7 +304,7 @@ func isForbiddenSystemPath(resolvedPath string) bool {
 // and do not escape the project directory.
 func validateProvisionSteps(vmConfig VM, projectDir string) error {
 	for _, step := range vmConfig.Provision {
-		if step.Type != "file" {
+		if step.Type != ProvisionFile {
 			continue
 		}
 		if step.Source == "" {

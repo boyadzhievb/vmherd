@@ -74,9 +74,9 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 		state := vm.State(domainName)
 
 		switch state {
-		case "running":
+		case vm.StateRunning:
 			runningVMs = append(runningVMs, vmConfig)
-		case "shut off":
+		case vm.StateStopped:
 			stoppedVMs = append(stoppedVMs, vmConfig)
 		default:
 			return nil, fmt.Errorf("cannot restart %s: VM does not exist — run 'vmherd up %s' first", vmConfig.Name, vmConfig.Name)
@@ -87,7 +87,9 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 		domainName := project.DomainName(vmConfig.Name)
 		ui.Printf("Stopping %s...\n", vmConfig.Name)
 		teardownPortForwarding(vmConfig)
-		_ = vm.Shutdown(domainName)
+		if err := vm.Shutdown(domainName); err != nil {
+			ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
+		}
 	}
 
 	if len(runningVMs) > 0 {
@@ -95,7 +97,7 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 
 		for _, vmConfig := range runningVMs {
 			domainName := project.DomainName(vmConfig.Name)
-			if vm.State(domainName) == "running" {
+			if vm.State(domainName) == vm.StateRunning {
 				ui.Printf("Force-stopping %s...\n", vmConfig.Name)
 				if err := vm.ForceStop(domainName); err != nil {
 					return nil, fmt.Errorf("cannot force-stop %s: %w", vmConfig.Name, err)

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newInitCmd creates the 'init' command that generates an example Herdfile.
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",

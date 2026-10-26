@@ -109,7 +109,7 @@ func TestFullVMLifecycle(t *testing.T) {
 	if !vm.Exists(testDomainName) {
 		t.Fatal("VM should exist after creation")
 	}
-	if state := vm.State(testDomainName); state != "running" {
+	if state := vm.State(testDomainName); state != vm.StateRunning {
 		t.Fatalf("expected VM state 'running', got %q", state)
 	}
 

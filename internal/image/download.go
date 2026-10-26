@@ -130,7 +130,9 @@ func cleanStaleTempFiles(cacheDir string) {
 	}
 	for _, staleFile := range matches {
 		ui.Printf("Removing stale download: %s\n", filepath.Base(staleFile))
-		_ = os.Remove(staleFile)
+		if err := os.Remove(staleFile); err != nil {
+			ui.Printf("Warning: could not remove stale temp file %s: %v\n", staleFile, err)
+		}
 	}
 }
 
@@ -154,8 +156,13 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 }
 
 // fetchExpectedChecksum downloads the vendor checksum file and extracts the expected hash.
+// Enforces HTTPS and limits response size to prevent resource exhaustion.
 func fetchExpectedChecksum(entry *Entry) (string, error) {
-	resp, err := http.Get(entry.ChecksumURL) //nolint:gosec // URLs come from the built-in registry
+	if !strings.HasPrefix(entry.ChecksumURL, "https://") {
+		return "", fmt.Errorf("checksum URL must use HTTPS: %s", entry.ChecksumURL)
+	}
+
+	resp, err := http.Get(entry.ChecksumURL) //nolint:noctx // URLs come from the built-in registry, not user input
 	if err != nil {
 		return "", fmt.Errorf("cannot download checksum file: %w", err)
 	}
@@ -165,7 +172,10 @@ func fetchExpectedChecksum(entry *Entry) (string, error) {
 		return "", fmt.Errorf("HTTP %d fetching checksum from %s", resp.StatusCode, entry.ChecksumURL)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	const maxChecksumFileSize = 1 << 20 // 1 MB
+	limitedReader := io.LimitReader(resp.Body, maxChecksumFileSize)
+
+	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return "", fmt.Errorf("cannot read checksum response: %w", err)
 	}
@@ -174,10 +184,8 @@ func fetchExpectedChecksum(entry *Entry) (string, error) {
 }
 
 // parseChecksum extracts the SHA256 hash for a filename from a checksum file.
-// Handles both formats:
-//
-//	"hash *filename" (sha256sum format, used by Ubuntu/Debian)
-//	"SHA256 (filename) = hash" (BSD/Fedora format)
+// Uses exact filename matching to prevent substring collisions. Handles both
+// "hash *filename" (sha256sum format) and "SHA256 (filename) = hash" (BSD format).
 func parseChecksum(content, filename string) (string, error) {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -185,24 +193,21 @@ func parseChecksum(content, filename string) (string, error) {
 			continue
 		}
 
-		if !strings.Contains(line, filename) {
-			continue
-		}
-
-		if strings.Contains(line, ".manifest") {
-			continue
-		}
-
-		if strings.Contains(line, " = ") {
+		// BSD format: "SHA256 (filename) = hash"
+		if strings.Contains(line, "("+filename+")") && strings.Contains(line, " = ") {
 			parts := strings.SplitN(line, " = ", 2)
 			if len(parts) == 2 {
 				return strings.TrimSpace(parts[1]), nil
 			}
 		}
 
+		// sha256sum format: "hash  filename" or "hash *filename"
 		fields := strings.Fields(line)
 		if len(fields) >= 2 {
-			return fields[0], nil
+			candidateFilename := strings.TrimPrefix(fields[1], "*")
+			if candidateFilename == filename {
+				return fields[0], nil
+			}
 		}
 	}
 

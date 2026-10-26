@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // ensureSharedFolderAccess grants the QEMU process user write access to a shared
@@ -19,6 +21,8 @@ func ensureSharedFolderAccess(hostPath string) error {
 	if err := setfacl.Run(); err == nil {
 		return nil
 	}
+
+	ui.Printf("Warning: setfacl unavailable for %s, falling back to chmod o+rwx — install the acl package for tighter permissions\n", hostPath)
 
 	chmod := exec.Command("sudo", "chmod", "o+rwx", hostPath)
 	if err := chmod.Run(); err != nil {

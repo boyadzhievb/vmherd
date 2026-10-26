@@ -232,6 +232,12 @@ func TestGenerateFilesWithFileProvisioning(t *testing.T) {
 	if !strings.Contains(content, "encoding: b64") {
 		t.Error("user-data missing base64 encoding marker")
 	}
+	if !strings.Contains(content, "permissions: '0644'") {
+		t.Error("user-data should set write_files permissions to 0644")
+	}
+	if strings.Contains(content, "permissions: '0755'") {
+		t.Error("user-data should not use overly permissive 0755 for write_files")
+	}
 }
 
 func TestGenerateFilesWithMissingSourceFile(t *testing.T) {
@@ -517,9 +523,9 @@ func TestMultiLineInlineCommandWrappedInBash(t *testing.T) {
 	}
 }
 
-// TestSingleLineInlineCommandNotWrapped verifies that single-line shell commands
-// are emitted as plain runcmd entries without a bash -c wrapper.
-func TestSingleLineInlineCommandNotWrapped(t *testing.T) {
+// TestSingleLineCommandWrappedInBash verifies that single-line shell commands
+// are wrapped in bash -c to prevent YAML injection from special characters.
+func TestSingleLineCommandWrappedInBash(t *testing.T) {
 	stateDir := t.TempDir()
 	vmConfig := config.VM{
 		Name:  "singleline-vm",
@@ -543,11 +549,62 @@ func TestSingleLineInlineCommandNotWrapped(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, "  - apt-get update\n") {
-		t.Error("single-line command should appear as plain runcmd entry")
+	if !strings.Contains(content, `["/bin/bash", "-c",`) {
+		t.Error("single-line command should be wrapped in bash -c invocation")
 	}
-	if strings.Contains(content, `"/bin/bash"`) {
-		t.Error("single-line command should not be wrapped in bash -c")
+	if !strings.Contains(content, "apt-get update") {
+		t.Error("single-line command content should be present")
+	}
+}
+
+// TestYAMLSpecialCharactersInCommand verifies that commands containing YAML-special
+// characters (colon-space, hash, brackets) are safely quoted via bash -c wrapping.
+func TestYAMLSpecialCharactersInCommand(t *testing.T) {
+	testCases := []struct {
+		name    string
+		command string
+	}{
+		{name: "colon space", command: "echo hello: world"},
+		{name: "hash comment", command: "echo hello # this is not a comment"},
+		{name: "square bracket", command: "echo [array]"},
+		{name: "curly brace", command: "echo {mapping}"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			vmConfig := config.VM{
+				Name:  "yaml-test",
+				Image: "ubuntu:noble",
+				Network: config.VMNetworkConfig{
+					IP: "10.0.0.5",
+				},
+				Provision: []config.Provision{
+					{Type: "shell", Inline: tc.command},
+				},
+			}
+
+			files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			data, err := os.ReadFile(files.UserData)
+			if err != nil {
+				t.Fatalf("cannot read user-data: %v", err)
+			}
+			content := string(data)
+
+			if !strings.Contains(content, `["/bin/bash", "-c",`) {
+				t.Errorf("command with %s should be wrapped in bash -c", tc.name)
+			}
+
+			// The command must NOT appear as a bare YAML string (  - <command>).
+			bareEntry := "  - " + tc.command + "\n"
+			if strings.Contains(content, bareEntry) {
+				t.Errorf("command with %s should not appear as bare YAML string", tc.name)
+			}
+		})
 	}
 }
 

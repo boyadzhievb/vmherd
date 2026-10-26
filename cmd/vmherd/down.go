@@ -11,6 +11,7 @@ import (
 
 const gracefulShutdownWait = 5 * time.Second
 
+// newDownCmd creates the 'down' command that gracefully stops VMs.
 func newDownCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down [name...]",
@@ -26,15 +27,17 @@ func newDownCmd() *cobra.Command {
 				return err
 			}
 
+			shutdownSent := false
 			for _, vmConfig := range vms {
 				domainName := project.DomainName(vmConfig.Name)
 				state := vm.State(domainName)
 
-				if state != "running" {
+				if state != vm.StateRunning {
 					ui.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
 					continue
 				}
 
+				shutdownSent = true
 				ui.Printf("Stopping %s...\n", vmConfig.Name)
 				teardownPortForwarding(vmConfig)
 				if err := vm.Shutdown(domainName); err != nil {
@@ -42,14 +45,16 @@ func newDownCmd() *cobra.Command {
 				}
 			}
 
-			time.Sleep(gracefulShutdownWait)
+			if shutdownSent {
+				time.Sleep(gracefulShutdownWait)
 
-			for _, vmConfig := range vms {
-				domainName := project.DomainName(vmConfig.Name)
-				if vm.State(domainName) == "running" {
-					ui.Printf("Force-stopping %s...\n", vmConfig.Name)
-					if err := vm.ForceStop(domainName); err != nil {
-						ui.Printf("Warning: force-stop failed for %s: %v\n", vmConfig.Name, err)
+				for _, vmConfig := range vms {
+					domainName := project.DomainName(vmConfig.Name)
+					if vm.State(domainName) == vm.StateRunning {
+						ui.Printf("Force-stopping %s...\n", vmConfig.Name)
+						if err := vm.ForceStop(domainName); err != nil {
+							ui.Printf("Warning: force-stop failed for %s: %v\n", vmConfig.Name, err)
+						}
 					}
 				}
 			}

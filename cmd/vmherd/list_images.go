@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newListImagesCmd creates the 'list-images' command that shows available cloud images.
 func newListImagesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list-images",

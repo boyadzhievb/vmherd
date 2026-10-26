@@ -6,7 +6,20 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/boyadzhievb/vmherd/internal/libvirt"
 	"github.com/boyadzhievb/vmherd/internal/ui"
+)
+
+// VMState represents the lifecycle state of a virtual machine.
+type VMState string
+
+const (
+	// StateRunning indicates the VM is powered on and active.
+	StateRunning VMState = "running"
+	// StateStopped indicates the VM exists but is powered off.
+	StateStopped VMState = "shut off"
+	// StateNotCreated indicates the VM does not exist in libvirt.
+	StateNotCreated VMState = "not created"
 )
 
 // GenerateMACAddress creates a random MAC address with the QEMU OUI prefix (52:54:00).
@@ -83,7 +96,9 @@ func Create(opts CreateOptions) error {
 	cmd.Stderr = ui.Stderr()
 
 	if err := cmd.Run(); err != nil {
-		_ = exec.Command("sudo", "unlink", opts.DiskPath).Run()
+		if cleanupErr := exec.Command("sudo", "unlink", opts.DiskPath).Run(); cleanupErr != nil {
+			ui.Printf("Warning: could not clean up disk %s: %v\n", opts.DiskPath, cleanupErr)
+		}
 		return fmt.Errorf("virt-install failed for %s: %w — check that libvirtd is running and you have permission", opts.DomainName, err)
 	}
 
@@ -92,7 +107,7 @@ func Create(opts CreateOptions) error {
 
 // Start boots a stopped VM.
 func Start(domainName string) error {
-	if err := virsh("start", domainName); err != nil {
+	if err := libvirt.Virsh("start", domainName); err != nil {
 		return fmt.Errorf("cannot start VM %s: %w", domainName, err)
 	}
 	return nil
@@ -100,7 +115,7 @@ func Start(domainName string) error {
 
 // Shutdown sends a graceful shutdown signal to a VM.
 func Shutdown(domainName string) error {
-	if err := virsh("shutdown", domainName); err != nil {
+	if err := libvirt.Virsh("shutdown", domainName); err != nil {
 		return fmt.Errorf("cannot shut down VM %s: %w", domainName, err)
 	}
 	return nil
@@ -108,17 +123,19 @@ func Shutdown(domainName string) error {
 
 // ForceStop immediately powers off a VM.
 func ForceStop(domainName string) error {
-	return virsh("destroy", domainName)
+	return libvirt.Virsh("destroy", domainName)
 }
 
 // Destroy removes a VM and its storage.
 func Destroy(domainName string) error {
 	state := State(domainName)
-	if state == "running" {
-		_ = ForceStop(domainName)
+	if state == StateRunning {
+		if err := ForceStop(domainName); err != nil {
+			ui.Printf("Warning: force-stop failed for %s: %v\n", domainName, err)
+		}
 	}
 
-	if err := virsh("undefine", domainName, "--remove-all-storage"); err != nil {
+	if err := libvirt.Virsh("undefine", domainName, "--remove-all-storage"); err != nil {
 		return fmt.Errorf("cannot destroy VM %s: %w", domainName, err)
 	}
 	return nil
@@ -133,13 +150,13 @@ func Exists(domainName string) bool {
 }
 
 // State returns the current state of a VM (running, shut off, etc).
-// Returns "not created" if the VM doesn't exist.
-func State(domainName string) string {
+// Returns StateNotCreated if the VM doesn't exist.
+func State(domainName string) VMState {
 	out, err := exec.Command("sudo", "virsh", "domstate", domainName).Output()
 	if err != nil {
-		return "not created"
+		return StateNotCreated
 	}
-	return strings.TrimSpace(string(out))
+	return VMState(strings.TrimSpace(string(out)))
 }
 
 // checkDiskPathAvailable verifies that no file already exists at the target disk
@@ -170,12 +187,4 @@ func createDisk(diskPath, backingImage, diskSize string) error {
 		return fmt.Errorf("cannot create disk %s: %w", diskPath, err)
 	}
 	return nil
-}
-
-// virsh runs a virsh subcommand with sudo and streams output to the UI.
-func virsh(args ...string) error {
-	cmd := exec.Command("sudo", append([]string{"virsh"}, args...)...)
-	cmd.Stdout = ui.Stdout()
-	cmd.Stderr = ui.Stderr()
-	return cmd.Run()
 }

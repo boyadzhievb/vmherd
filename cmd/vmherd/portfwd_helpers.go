@@ -16,12 +16,13 @@ func hasPortForwards(vms []config.VM) bool {
 	return false
 }
 
-// setupPortForwarding configures iptables DNAT rules for a VM's port forwards.
+// setupPortForwarding removes any stale rules then installs iptables DNAT rules for a VM's port forwards.
 func setupPortForwarding(vmConfig config.VM) {
 	if len(vmConfig.Ports) == 0 || vmConfig.Network.IP == "" {
 		return
 	}
 	rules := buildPortForwardRules(vmConfig)
+	portfwd.Teardown(rules)
 	if err := portfwd.Setup(rules); err != nil {
 		ui.Printf("Warning: port forwarding setup failed for %s: %v\n", vmConfig.Name, err)
 	}

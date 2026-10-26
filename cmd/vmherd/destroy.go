@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newDestroyCmd creates the 'destroy' command that removes VMs and their disks.
 func newDestroyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "destroy [name...]",

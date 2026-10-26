@@ -10,6 +10,7 @@ import (
 
 var version = "dev"
 
+// main is the entry point for the vmherd CLI.
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "vmherd",

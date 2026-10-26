@@ -77,64 +77,85 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 	builder.WriteString("package_update: false\n")
 	builder.WriteString("package_upgrade: false\n")
 
+	hasRuncmdSection := false
 	if len(vm.Provision) > 0 {
-		var runcmds []string
-		var writeFiles []config.Provision
-
-		for _, step := range vm.Provision {
-			switch step.Type {
-			case "shell":
-				if step.Inline != "" {
-					runcmds = append(runcmds, step.Inline)
-				}
-			case "file":
-				writeFiles = append(writeFiles, step)
-			}
+		wroteRuncmds, err := writeProvisionEntries(&builder, vm.Provision)
+		if err != nil {
+			return err
 		}
-
-		if len(writeFiles) > 0 {
-			builder.WriteString("write_files:\n")
-			for _, wf := range writeFiles {
-				content, err := os.ReadFile(wf.Source)
-				if err != nil {
-					return fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
-				}
-				encoded := base64.StdEncoding.EncodeToString(content)
-				fmt.Fprintf(&builder, "  - path: %s\n", wf.Destination)
-				builder.WriteString("    encoding: b64\n")
-				fmt.Fprintf(&builder, "    content: %s\n", encoded)
-				builder.WriteString("    permissions: '0755'\n")
-			}
-		}
-
-		if len(runcmds) > 0 {
-			builder.WriteString("runcmd:\n")
-			for _, cmd := range runcmds {
-				trimmedCommand := strings.TrimSpace(cmd)
-				if strings.Contains(trimmedCommand, "\n") {
-					fmt.Fprintf(&builder, "  - [\"/bin/bash\", \"-c\", %q]\n", trimmedCommand)
-				} else {
-					fmt.Fprintf(&builder, "  - %s\n", trimmedCommand)
-				}
-			}
-		}
+		hasRuncmdSection = wroteRuncmds
 	}
 
 	if len(sharedMounts) > 0 {
-		if !strings.Contains(builder.String(), "runcmd:\n") {
-			builder.WriteString("runcmd:\n")
-		}
-		for _, mount := range sharedMounts {
-			fmt.Fprintf(&builder, "  - mkdir -p %s\n", mount.GuestPath)
-			fmt.Fprintf(&builder, "  - mount -t 9p -o trans=virtio,version=9p2000.L %s %s\n", mount.MountTag, mount.GuestPath)
-		}
-		builder.WriteString("mounts:\n")
-		for _, mount := range sharedMounts {
-			fmt.Fprintf(&builder, "  - [%s, %s, 9p, \"trans=virtio,version=9p2000.L\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath)
-		}
+		writeSharedMountEntries(&builder, sharedMounts, hasRuncmdSection)
 	}
 
 	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o600)
+}
+
+// writeProvisionEntries appends cloud-init write_files and runcmd entries for provisioning steps.
+// Returns true if a runcmd section was written (so shared mounts can append to it).
+func writeProvisionEntries(builder *strings.Builder, provisions []config.Provision) (bool, error) {
+	var runcmds []string
+	var writeFiles []config.Provision
+
+	for _, step := range provisions {
+		switch step.Type {
+		case config.ProvisionShell:
+			if step.Inline != "" {
+				runcmds = append(runcmds, step.Inline)
+			}
+		case config.ProvisionFile:
+			writeFiles = append(writeFiles, step)
+		}
+	}
+
+	if len(writeFiles) > 0 {
+		builder.WriteString("write_files:\n")
+		for _, wf := range writeFiles {
+			content, err := os.ReadFile(wf.Source)
+			if err != nil {
+				return false, fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
+			}
+			encoded := base64.StdEncoding.EncodeToString(content)
+			fmt.Fprintf(builder, "  - path: %s\n", wf.Destination)
+			builder.WriteString("    encoding: b64\n")
+			fmt.Fprintf(builder, "    content: %s\n", encoded)
+			builder.WriteString("    permissions: '0644'\n")
+		}
+	}
+
+	writeRuncmdEntries(builder, runcmds)
+	return len(runcmds) > 0, nil
+}
+
+// writeRuncmdEntries appends cloud-init runcmd entries for shell provisioning steps.
+func writeRuncmdEntries(builder *strings.Builder, runcmds []string) {
+	if len(runcmds) == 0 {
+		return
+	}
+	builder.WriteString("runcmd:\n")
+	for _, cmd := range runcmds {
+		trimmedCommand := strings.TrimSpace(cmd)
+		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", trimmedCommand)
+	}
+}
+
+// writeSharedMountEntries appends runcmd and mounts entries for 9p shared folders.
+func writeSharedMountEntries(builder *strings.Builder, sharedMounts []SharedMount, hasProvisionRuncmds bool) {
+	if !hasProvisionRuncmds {
+		builder.WriteString("runcmd:\n")
+	}
+	for _, mount := range sharedMounts {
+		mkdirCommand := fmt.Sprintf("mkdir -p %s", mount.GuestPath)
+		mountCommand := fmt.Sprintf("mount -t 9p -o trans=virtio,version=9p2000.L %s %s", mount.MountTag, mount.GuestPath)
+		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mkdirCommand)
+		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mountCommand)
+	}
+	builder.WriteString("mounts:\n")
+	for _, mount := range sharedMounts {
+		fmt.Fprintf(builder, "  - [%s, %s, 9p, \"trans=virtio,version=9p2000.L\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath)
+	}
 }
 
 // writeNetworkConfig generates the cloud-init network-config file for static IP assignment.

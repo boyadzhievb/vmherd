@@ -769,3 +769,139 @@ network:
 		t.Errorf("expected error about escaping project directory, got: %v", err)
 	}
 }
+
+func TestValidateSSHUserInvalid(t *testing.T) {
+	invalidUsers := []struct {
+		user string
+		desc string
+	}{
+		{"root\ninjection", "newline injection"},
+		{"; rm -rf /", "command injection"},
+		{"UPPERCASE", "uppercase letters"},
+		{strings.Repeat("a", 33), "exceeds 32 characters"},
+		{"123start", "starts with digit"},
+		{"user name", "contains space"},
+		{"user.name", "contains dot"},
+	}
+	for _, tc := range invalidUsers {
+		t.Run(tc.desc, func(t *testing.T) {
+			dir := t.TempDir()
+			herdfile := fmt.Sprintf(`
+vms:
+  - name: web
+    image: ubuntu:noble
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+ssh:
+  user: "%s"
+`, tc.user)
+			if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatalf("expected error for invalid SSH user %q (%s)", tc.user, tc.desc)
+			}
+			if !strings.Contains(err.Error(), "ssh.user") {
+				t.Errorf("expected error about ssh.user, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSSHUserValid(t *testing.T) {
+	validUsers := []string{"vmherd", "test-user", "_service", "a", "user_123"}
+	for _, user := range validUsers {
+		t.Run(user, func(t *testing.T) {
+			dir := t.TempDir()
+			herdfile := fmt.Sprintf(`
+vms:
+  - name: web
+    image: ubuntu:noble
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+ssh:
+  user: %s
+`, user)
+			if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(dir)
+			if err != nil {
+				t.Fatalf("valid SSH user %q should not produce error, got: %v", user, err)
+			}
+		})
+	}
+}
+
+func TestValidateSubnetNon24Rejected(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+network:
+  name: test-net
+  subnet: 10.0.0.0/16
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for non-/24 subnet")
+	}
+	if !strings.Contains(err.Error(), "only /24 subnets are supported") {
+		t.Errorf("expected error about /24 requirement, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/16") {
+		t.Errorf("expected error to mention the actual prefix /16, got: %v", err)
+	}
+}
+
+func TestValidateIPInDHCPPoolRejected(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 192.168.122.150
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for IP in DHCP pool range")
+	}
+	if !strings.Contains(err.Error(), "DHCP pool range") {
+		t.Errorf("expected error about DHCP pool range, got: %v", err)
+	}
+}
+
+func TestValidateIPOutsideDHCPPoolAccepted(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 192.168.122.10
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err != nil {
+		t.Fatalf("IP outside DHCP pool should be accepted, got: %v", err)
+	}
+}

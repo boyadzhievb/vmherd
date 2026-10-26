@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newSCPCmd creates the 'scp' command for copying files to and from VMs.
 func newSCPCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "scp <source> <destination>",
@@ -45,7 +46,7 @@ Examples:
 					colonIdx := strings.Index(arg, ":")
 					if colonIdx > 0 && arg[:colonIdx] == vmConfig.Name {
 						domainName := project.DomainName(vmConfig.Name)
-						if vm.State(domainName) != "running" {
+						if vm.State(domainName) != vm.StateRunning {
 							return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmConfig.Name, vmConfig.Name)
 						}
 					}

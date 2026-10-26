@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newPullCmd creates the 'pull' command that downloads cloud images.
 func newPullCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull <distro:codename>",
