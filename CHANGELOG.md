@@ -4,6 +4,12 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.12
+
+**2026-10-26** — Fix release script cross-platform compatibility
+
+---
+
 ## v0.1.11
 
 **2026-10-26** — Fix 49 review findings across two comprehensive code reviews
