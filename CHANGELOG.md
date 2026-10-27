@@ -4,6 +4,12 @@ All notable releases are documented here.
 
 ---
 
+## v0.1.15
+
+**2026-10-27** — Redesing registry
+
+---
+
 ## v0.1.14
 
 **2026-10-27** — Autodicovers sums
