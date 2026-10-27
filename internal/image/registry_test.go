@@ -33,8 +33,10 @@ func TestResolveKnownImages(t *testing.T) {
 		if entry.ImageURL == "" {
 			t.Errorf("Resolve(%q).ImageURL is empty", tt.spec)
 		}
-		if entry.ChecksumURL == "" {
-			t.Errorf("Resolve(%q).ChecksumURL is empty", tt.spec)
+		// ChecksumURL is optional — entries without it use auto-discovery.
+		// Only Arch has an explicit ChecksumURL (non-standard single-file format).
+		if entry.Distro == "arch" && entry.ChecksumURL == "" {
+			t.Errorf("Resolve(%q).ChecksumURL should be set for arch (non-discoverable)", tt.spec)
 		}
 		if entry.OSVariant == "" {
 			t.Errorf("Resolve(%q).OSVariant is empty", tt.spec)
@@ -305,7 +307,7 @@ func TestDownloadFileRejectsNonHTTPS(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			destPath := filepath.Join(t.TempDir(), "output.qcow2")
-			_, err := downloadFile(tt.url, destPath)
+			_, err := downloadFileWithHash(tt.url, destPath, "sha256")
 			if err == nil {
 				t.Fatalf("expected error for non-HTTPS URL %q, got nil", tt.url)
 			}
