@@ -144,7 +144,7 @@ func shutdownAndDestroy(domainName, vmName string) error {
 
 // createVM resolves the image, generates cloud-init files, and creates a new VM.
 func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, subnetBase, dnsServer string) error {
-	entry, err := image.Resolve(vmConfig.Image)
+	entry, err := image.Resolve(vmConfig.Image, project.Herdfile.Images)
 	if err != nil {
 		return err
 	}
@@ -173,6 +173,11 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		return err
 	}
 
+	var consoleLogPath string
+	if vmConfig.ConsoleLog {
+		consoleLogPath = project.ConsoleLogPath(vmConfig.Name)
+	}
+
 	if err := vm.Create(vm.CreateOptions{
 		VMName:             vmConfig.Name,
 		DomainName:         domainName,
@@ -188,6 +193,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		ImagePath:          imagePath,
 		DiskSize:           vmConfig.Disk,
 		SharedFolders:      sharedMounts,
+		ConsoleLogPath:     consoleLogPath,
 	}); err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/spf13/cobra"
 )
@@ -13,9 +14,16 @@ import (
 func newListImagesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list-images",
-		Short: "Show available cloud images from the built-in registry",
+		Short: "Show cloud images defined in the Herdfile (or defaults if no Herdfile)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entries := image.ListAll()
+			images := image.DefaultImages()
+
+			project, loadError := config.LoadProject()
+			if loadError == nil && len(project.Herdfile.Images) > 0 {
+				images = project.Herdfile.Images
+			}
+
+			entries := image.ListAll(images)
 
 			writer := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 			_, _ = fmt.Fprintln(writer, "IMAGE\tDESCRIPTION\tCACHED")

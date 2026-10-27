@@ -2,9 +2,10 @@ package config
 
 // Herdfile represents the top-level vmherd project configuration.
 type Herdfile struct {
-	VMs     []VM          `yaml:"vms"`     // virtual machines to manage
-	Network NetworkConfig `yaml:"network"` // shared libvirt network settings
-	SSH     SSHConfig     `yaml:"ssh"`     // default SSH credentials
+	Images  map[string]string `yaml:"images"`  // image code to download URL (e.g. "ubuntu:noble" -> "https://...")
+	VMs     []VM              `yaml:"vms"`      // virtual machines to manage
+	Network NetworkConfig     `yaml:"network"`  // shared libvirt network settings
+	SSH     SSHConfig         `yaml:"ssh"`      // default SSH credentials
 }
 
 // VM defines a single virtual machine.
@@ -18,6 +19,7 @@ type VM struct {
 	SharedFolders []SharedFolder  `yaml:"shared_folders"` // host-to-guest directory mounts
 	Ports         []PortForward   `yaml:"ports"`          // host-to-guest port mappings
 	Provision     []Provision     `yaml:"provision"`      // provisioning steps run after boot
+	ConsoleLog    bool            `yaml:"console_log"`    // capture serial console to a log file in state dir
 }
 
 // SharedFolder maps a host directory into the guest filesystem.

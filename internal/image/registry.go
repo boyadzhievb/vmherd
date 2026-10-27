@@ -2,136 +2,147 @@ package image
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
-// Entry describes a cloud image available in the built-in registry.
+// Entry describes a cloud image resolved from the Herdfile images section.
 type Entry struct {
 	Distro      string // vendor name (e.g. ubuntu, debian)
 	Codename    string // release codename or version (e.g. noble, 41)
 	Description string // human-readable label for display
 	ImageURL    string // HTTPS URL to the qcow2 cloud image
-	ChecksumURL string // HTTPS URL to the vendor checksum file
+	ChecksumURL string // HTTPS URL to the vendor checksum file (empty = auto-discover)
 	Filename    string // image filename used to match checksum entries
 	OSVariant   string // virt-install os-variant hint
 }
 
-// Resolve looks up a distro:codename image spec in the built-in registry.
-func Resolve(imageSpec string) (*Entry, error) {
+// Resolve looks up an image spec in the Herdfile images map and constructs an Entry.
+func Resolve(imageSpec string, images map[string]string) (*Entry, error) {
 	parts := strings.SplitN(imageSpec, ":", 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("image must be 'distro:codename' format, got %q", imageSpec)
 	}
 	distro, codename := parts[0], parts[1]
-	key := distro + ":" + codename
 
-	entry, ok := registry[key]
-	if !ok {
-		available := availableForDistro(distro)
-		if len(available) > 0 {
-			return nil, fmt.Errorf("unknown image %q — available %s versions: %s\n\nRun 'vmherd list-images' to see all options",
-				imageSpec, distro, strings.Join(available, ", "))
-		}
-		return nil, fmt.Errorf("unknown distro %q — run 'vmherd list-images' to see available images", distro)
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no images defined — add an 'images:' section to your Herdfile:\nimages:\n  %s: <url>\n\nRun 'vmherd init' for an example", imageSpec)
 	}
-	return &entry, nil
+
+	imageURL, found := images[imageSpec]
+	if !found {
+		available := availableForDistro(distro, images)
+		if len(available) > 0 {
+			return nil, fmt.Errorf("image %q not defined in Herdfile images section — available %s: %s\n\nAdd it to your Herdfile:\nimages:\n  %s: <url>",
+				imageSpec, distro, strings.Join(available, ", "), imageSpec)
+		}
+		return nil, fmt.Errorf("image %q not defined in Herdfile images section — add it:\nimages:\n  %s: <url>", imageSpec, imageSpec)
+	}
+
+	filename := path.Base(imageURL)
+	osVariant := deriveOSVariant(distro, codename)
+	description := buildDescription(distro, codename)
+
+	return &Entry{
+		Distro:      distro,
+		Codename:    codename,
+		Description: description,
+		ImageURL:    imageURL,
+		Filename:    filename,
+		OSVariant:   osVariant,
+	}, nil
 }
 
-// ListAll returns all entries in the built-in registry, ordered by distro.
-func ListAll() []Entry {
-	return registryOrdered
-}
-
-func availableForDistro(distro string) []string {
+// availableForDistro returns codenames defined in the images map for a given distro.
+func availableForDistro(distro string, images map[string]string) []string {
 	var codenames []string
-	for _, entry := range registryOrdered {
-		if entry.Distro == distro {
-			codenames = append(codenames, entry.Codename)
+	prefix := distro + ":"
+	for spec := range images {
+		if strings.HasPrefix(spec, prefix) {
+			codenames = append(codenames, strings.TrimPrefix(spec, prefix))
 		}
 	}
 	return codenames
 }
 
-var registry = map[string]Entry{}
+// deriveOSVariant maps a distro:codename to a virt-install os-variant hint.
+func deriveOSVariant(distro, codename string) string {
+	knownVariants := map[string]string{
+		"ubuntu:noble":    "ubuntu24.04",
+		"ubuntu:jammy":    "ubuntu22.04",
+		"ubuntu:focal":    "ubuntu20.04",
+		"ubuntu:resolute": "ubuntu26.04",
+		"ubuntu:questing": "ubuntu25.10",
+		"ubuntu:stonking": "ubuntu26.10",
+		"debian:bookworm": "debian12",
+		"debian:trixie":   "debian13",
+		"fedora:41":       "fedora41",
+		"fedora:42":       "fedora42",
+		"rocky:9":         "rocky9",
+		"almalinux:9":     "almalinux9",
+		"arch:latest":     "archlinux",
+	}
 
-var registryOrdered = []Entry{
-	{
-		Distro:      "ubuntu",
-		Codename:    "noble",
-		Description: "Ubuntu 24.04 LTS (Noble Numbat)",
-		ImageURL:    "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-		Filename:    "noble-server-cloudimg-amd64.img",
-		OSVariant:   "ubuntu24.04",
-	},
-	{
-		Distro:      "ubuntu",
-		Codename:    "jammy",
-		Description: "Ubuntu 22.04 LTS (Jammy Jellyfish)",
-		ImageURL:    "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
-		Filename:    "jammy-server-cloudimg-amd64.img",
-		OSVariant:   "ubuntu22.04",
-	},
-	{
-		Distro:      "ubuntu",
-		Codename:    "focal",
-		Description: "Ubuntu 20.04 LTS (Focal Fossa)",
-		ImageURL:    "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
-		Filename:    "focal-server-cloudimg-amd64.img",
-		OSVariant:   "ubuntu20.04",
-	},
-	{
-		Distro:      "debian",
-		Codename:    "bookworm",
-		Description: "Debian 12 (Bookworm)",
-		ImageURL:    "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
-		Filename:    "debian-12-generic-amd64.qcow2",
-		OSVariant:   "debian12",
-	},
-	{
-		Distro:      "debian",
-		Codename:    "trixie",
-		Description: "Debian 13 (Trixie)",
-		ImageURL:    "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2",
-		Filename:    "debian-13-generic-amd64.qcow2",
-		OSVariant:   "debian13",
-	},
-	{
-		Distro:      "fedora",
-		Codename:    "41",
-		Description: "Fedora 41 Cloud",
-		ImageURL:    "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2",
-		Filename:    "Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2",
-		OSVariant:   "fedora41",
-	},
-	{
-		Distro:      "rocky",
-		Codename:    "9",
-		Description: "Rocky Linux 9",
-		ImageURL:    "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
-		Filename:    "Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
-		OSVariant:   "rocky9",
-	},
-	{
-		Distro:      "almalinux",
-		Codename:    "9",
-		Description: "AlmaLinux 9",
-		ImageURL:    "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2",
-		Filename:    "AlmaLinux-9-GenericCloud-latest.x86_64.qcow2",
-		OSVariant:   "almalinux9",
-	},
-	{
-		Distro:      "arch",
-		Codename:    "latest",
-		Description: "Arch Linux (latest)",
-		ImageURL:    "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2",
-		ChecksumURL: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2.SHA256",
-		Filename:    "Arch-Linux-x86_64-cloudimg.qcow2",
-		OSVariant:   "archlinux",
-	},
+	key := distro + ":" + codename
+	if variant, found := knownVariants[key]; found {
+		return variant
+	}
+
+	return "detect=on,require=off"
 }
 
-func init() {
-	for _, entry := range registryOrdered {
-		registry[entry.Distro+":"+entry.Codename] = entry
+// buildDescription creates a human-readable label from distro and codename.
+func buildDescription(distro, codename string) string {
+	capitalDistro := strings.ToUpper(distro[:1]) + distro[1:]
+	return fmt.Sprintf("%s %s", capitalDistro, codename)
+}
+
+// DefaultImages returns the image entries pre-populated in vmherd init.
+// Only Ubuntu and Fedora are included — users add other distros themselves.
+func DefaultImages() map[string]string {
+	return map[string]string{
+		"ubuntu:noble":    "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+		"ubuntu:resolute": "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img",
+		"fedora:42":       "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2",
+	}
+}
+
+// ListAll returns all entries from the provided images map, sorted by key.
+func ListAll(images map[string]string) []Entry {
+	keys := make([]string, 0, len(images))
+	for key := range images {
+		keys = append(keys, key)
+	}
+
+	sortStrings(keys)
+
+	entries := make([]Entry, 0, len(keys))
+	for _, key := range keys {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		entries = append(entries, Entry{
+			Distro:      parts[0],
+			Codename:    parts[1],
+			Description: buildDescription(parts[0], parts[1]),
+			ImageURL:    images[key],
+			Filename:    path.Base(images[key]),
+			OSVariant:   deriveOSVariant(parts[0], parts[1]),
+		})
+	}
+	return entries
+}
+
+// sortStrings sorts a string slice in place using insertion sort (small lists).
+func sortStrings(items []string) {
+	for index := 1; index < len(items); index++ {
+		current := items[index]
+		position := index
+		for position > 0 && items[position-1] > current {
+			items[position] = items[position-1]
+			position--
+		}
+		items[position] = current
 	}
 }

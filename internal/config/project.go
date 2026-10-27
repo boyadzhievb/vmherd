@@ -114,6 +114,11 @@ func (p *Project) SSHKeyPath() string {
 	return filepath.Join(p.StateDir, "id_ed25519")
 }
 
+// ConsoleLogPath returns the path where serial console output is logged for a VM.
+func (p *Project) ConsoleLogPath(vmName string) string {
+	return filepath.Join(p.StateDir, vmName, "console.log")
+}
+
 // SubnetBase extracts the first three octets from the network subnet.
 // e.g. "192.168.122.0/24" -> "192.168.122"
 func (p *Project) SubnetBase() (string, error) {
@@ -152,6 +157,11 @@ func ExampleHerdfile() string {
 	return strings.TrimSpace(`
 # Herdfile — vmherd VM definitions
 # Docs: https://github.com/boyadzhievb/vmherd
+
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  ubuntu:resolute: https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
+  fedora:42: https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2
 
 vms:
   - name: ctrl

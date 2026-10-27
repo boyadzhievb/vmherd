@@ -54,6 +54,7 @@ type CreateOptions struct {
 	ImagePath          string              // path to the backing cloud image
 	DiskSize           string              // disk size with unit (e.g. 20G)
 	SharedFolders      []SharedFolderMount // 9p host-to-guest directory mounts
+	ConsoleLogPath     string              // if set, serial console output is logged to this file
 }
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
@@ -71,15 +72,20 @@ func Create(opts CreateOptions) error {
 		"--name", opts.DomainName,
 		"--memory", fmt.Sprintf("%d", opts.Memory),
 		"--vcpus", fmt.Sprintf("%d", opts.CPUs),
+		"--cpu", "host-passthrough",
 		"--disk", fmt.Sprintf("path=%s,format=qcow2", opts.DiskPath),
 		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
 			opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig),
 		"--network", fmt.Sprintf("network=%s,mac=%s", opts.NetworkName, opts.MACAddress),
 		"--os-variant", opts.OSVariant,
-		"--graphics", "none",
+		"--graphics", "vnc,listen=none",
 		"--noautoconsole",
 		"--import",
 		"--autostart",
+	}
+
+	if opts.ConsoleLogPath != "" {
+		args = append(args, "--serial", fmt.Sprintf("file,path=%s", opts.ConsoleLogPath))
 	}
 
 	for _, sf := range opts.SharedFolders {

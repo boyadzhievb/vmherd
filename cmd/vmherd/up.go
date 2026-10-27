@@ -134,7 +134,7 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 		return activeVMs, nil
 	}
 
-	resolvedImages, err := resolveAndCacheImages(vmsToCreate)
+	resolvedImages, err := resolveAndCacheImages(vmsToCreate, project.Herdfile.Images)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +170,13 @@ type resolvedImage struct {
 
 // resolveAndCacheImages downloads all unique images needed by the VMs to create.
 // Runs serially to avoid concurrent download races on the same image file.
-func resolveAndCacheImages(vmsToCreate []config.VM) (map[string]resolvedImage, error) {
+func resolveAndCacheImages(vmsToCreate []config.VM, images map[string]string) (map[string]resolvedImage, error) {
 	resolved := make(map[string]resolvedImage)
 	for _, vmConfig := range vmsToCreate {
 		if _, ok := resolved[vmConfig.Image]; ok {
 			continue
 		}
-		entry, err := image.Resolve(vmConfig.Image)
+		entry, err := image.Resolve(vmConfig.Image, images)
 		if err != nil {
 			return nil, err
 		}
@@ -245,6 +245,11 @@ func createSingleVM(
 		return err
 	}
 
+	var consoleLogPath string
+	if vmConfig.ConsoleLog {
+		consoleLogPath = project.ConsoleLogPath(vmConfig.Name)
+	}
+
 	if err := vm.Create(vm.CreateOptions{
 		VMName:             vmConfig.Name,
 		DomainName:         domainName,
@@ -260,6 +265,7 @@ func createSingleVM(
 		ImagePath:          img.cachePath,
 		DiskSize:           vmConfig.Disk,
 		SharedFolders:      sharedMounts,
+		ConsoleLogPath:     consoleLogPath,
 	}); err != nil {
 		return err
 	}

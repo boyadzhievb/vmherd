@@ -7,22 +7,24 @@ import (
 	"testing"
 )
 
-func TestResolveKnownImages(t *testing.T) {
+func TestResolveFromImages(t *testing.T) {
+	images := map[string]string{
+		"ubuntu:noble":    "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+		"debian:bookworm": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-amd64.qcow2",
+		"fedora:42":       "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2",
+	}
+
 	tests := []struct {
 		spec       string
 		wantDistro string
 	}{
 		{"ubuntu:noble", "ubuntu"},
-		{"ubuntu:jammy", "ubuntu"},
 		{"debian:bookworm", "debian"},
-		{"fedora:41", "fedora"},
-		{"rocky:9", "rocky"},
-		{"almalinux:9", "almalinux"},
-		{"arch:latest", "arch"},
+		{"fedora:42", "fedora"},
 	}
 
 	for _, tt := range tests {
-		entry, err := Resolve(tt.spec)
+		entry, err := Resolve(tt.spec, images)
 		if err != nil {
 			t.Errorf("Resolve(%q): unexpected error: %v", tt.spec, err)
 			continue
@@ -33,40 +35,43 @@ func TestResolveKnownImages(t *testing.T) {
 		if entry.ImageURL == "" {
 			t.Errorf("Resolve(%q).ImageURL is empty", tt.spec)
 		}
-		// ChecksumURL is optional — entries without it use auto-discovery.
-		// Only Arch has an explicit ChecksumURL (non-standard single-file format).
-		if entry.Distro == "arch" && entry.ChecksumURL == "" {
-			t.Errorf("Resolve(%q).ChecksumURL should be set for arch (non-discoverable)", tt.spec)
-		}
 		if entry.OSVariant == "" {
 			t.Errorf("Resolve(%q).OSVariant is empty", tt.spec)
+		}
+		if entry.Filename == "" {
+			t.Errorf("Resolve(%q).Filename is empty", tt.spec)
 		}
 	}
 }
 
 func TestResolveUnknownImage(t *testing.T) {
-	_, err := Resolve("ubuntu:nonexistent")
+	images := map[string]string{
+		"ubuntu:noble": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+	}
+
+	_, err := Resolve("ubuntu:nonexistent", images)
 	if err == nil {
 		t.Fatal("expected error for unknown codename")
 	}
 
-	_, err = Resolve("nonexistent:thing")
+	_, err = Resolve("nonexistent:thing", images)
 	if err == nil {
 		t.Fatal("expected error for unknown distro")
 	}
 }
 
 func TestResolveBadFormat(t *testing.T) {
-	_, err := Resolve("ubuntu")
+	_, err := Resolve("ubuntu", nil)
 	if err == nil {
 		t.Fatal("expected error for bad format")
 	}
 }
 
 func TestListAll(t *testing.T) {
-	entries := ListAll()
+	images := DefaultImages()
+	entries := ListAll(images)
 	if len(entries) == 0 {
-		t.Fatal("expected at least one image in registry")
+		t.Fatal("expected at least one image from defaults")
 	}
 
 	seen := make(map[string]bool)
@@ -76,6 +81,16 @@ func TestListAll(t *testing.T) {
 			t.Errorf("duplicate entry: %s", key)
 		}
 		seen[key] = true
+	}
+}
+
+func TestDefaultImages(t *testing.T) {
+	defaults := DefaultImages()
+	if len(defaults) == 0 {
+		t.Fatal("DefaultImages returned empty map")
+	}
+	if _, found := defaults["ubuntu:noble"]; !found {
+		t.Error("DefaultImages missing ubuntu:noble")
 	}
 }
 

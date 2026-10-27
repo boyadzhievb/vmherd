@@ -34,7 +34,8 @@ func TestFullVMLifecycle(t *testing.T) {
 
 	stateDir := t.TempDir()
 
-	entry, err := image.Resolve("ubuntu:noble")
+	testImages := image.DefaultImages()
+	entry, err := image.Resolve("ubuntu:noble", testImages)
 	if err != nil {
 		t.Fatalf("cannot resolve image: %v", err)
 	}
