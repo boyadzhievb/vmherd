@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 1 |
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 2 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -34,11 +34,12 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** The whitespace fix is already in the working tree. Commit it on its own.
   - **Done when:** `gofmt -l .` prints nothing on `main`.
 
-- [ ] **M0.2 — Hooks must fire only on `git commit` / `git tag`** · High
+- [x] **M0.2 — Hooks must fire only on `git commit` / `git tag`** · High
   - **Files:** `.claude/settings.json`, new `.claude/hooks/pre-commit-gate.sh`
   - **Problem:** The `"if": "Bash(git commit *)"` filter isn't applied. gofmt, `go vet` and golangci-lint run before *every* shell command, and any unformatted file blocks all shell use, including the `gofmt -w` the hook tells you to run. The hooks also fail open when `jq` is missing.
   - **Fix:** Replace the four inline hooks with one script that reads the tool input, exits 0 unless the command is `git commit` (or `git tag` for the tag check), checks only staged `.go` files, and denies with a clear message when `jq` is missing.
   - **Done when:** `ls` works with an unformatted file in the tree, and `git commit` with that file staged is still blocked.
+  - **Note:** The gate matches command text, so any command that *contains* `git commit …` or `git tag <name>` (even inside an `echo` string) is checked too. gofmt checks tracked plus untracked, non-ignored `.go` files, not only staged ones, so that `git add x && git commit` in a single command is still covered.
 
 ### Phase 0B — CI exposure
 
