@@ -3,9 +3,9 @@ package config
 // Herdfile represents the top-level vmherd project configuration.
 type Herdfile struct {
 	Images  map[string]string `yaml:"images"`  // image code to download URL (e.g. "ubuntu:noble" -> "https://...")
-	VMs     []VM              `yaml:"vms"`      // virtual machines to manage
-	Network NetworkConfig     `yaml:"network"`  // shared libvirt network settings
-	SSH     SSHConfig         `yaml:"ssh"`      // default SSH credentials
+	VMs     []VM              `yaml:"vms"`     // virtual machines to manage
+	Network NetworkConfig     `yaml:"network"` // shared libvirt network settings
+	SSH     SSHConfig         `yaml:"ssh"`     // default SSH credentials
 }
 
 // VM defines a single virtual machine.
