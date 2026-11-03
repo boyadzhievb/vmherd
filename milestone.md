@@ -1,0 +1,370 @@
+# vmherd — Review Remediation Milestones
+
+Source: architecture review of 2026-11-03 (code, CI, `CLAUDE.md`, `.claude/`).
+This is a remediation plan, separate from the product roadmap milestones.
+
+## How to use this file
+
+- Work **one item at a time**, in order. Each item becomes one commit (or one PR).
+- Before committing: `gofmt -l .` is empty, `go vet ./...`, `go test ./...` and `golangci-lint run` all pass.
+- Tick the checkbox `[x]` in the same commit that fixes the item.
+- 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.43 before fixing. If it doesn't reproduce, close the item with a note.
+- 🧭 **Decision** = needs a product decision from the maintainer before any code changes.
+- Severity: **Crit** / **High** / **Med** / **Low**.
+
+## Progress
+
+| Milestone | Theme | Items | Done |
+|---|---|---|---|
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 1 |
+| M1 | Correctness of existing features | 11 | 0 |
+| M2 | Structure: state, abstractions, deduplication | 9 | 0 |
+| M3 | Supply chain, SSH trust, CI | 10 | 0 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
+
+---
+
+## M0 — Unblock tooling, stop data loss and host compromise
+
+### Phase 0A — Tooling unblock
+
+- [x] **M0.1 — Commit the gofmt fix for `config.go`** · Low
+  - **Files:** `internal/config/config.go`
+  - **Problem:** The file was committed with misaligned struct-tag comments. The gofmt hook then blocked all shell commands.
+  - **Fix:** The whitespace fix is already in the working tree. Commit it on its own.
+  - **Done when:** `gofmt -l .` prints nothing on `main`.
+
+- [ ] **M0.2 — Hooks must fire only on `git commit` / `git tag`** · High
+  - **Files:** `.claude/settings.json`, new `.claude/hooks/pre-commit-gate.sh`
+  - **Problem:** The `"if": "Bash(git commit *)"` filter isn't applied. gofmt, `go vet` and golangci-lint run before *every* shell command, and any unformatted file blocks all shell use, including the `gofmt -w` the hook tells you to run. The hooks also fail open when `jq` is missing.
+  - **Fix:** Replace the four inline hooks with one script that reads the tool input, exits 0 unless the command is `git commit` (or `git tag` for the tag check), checks only staged `.go` files, and denies with a clear message when `jq` is missing.
+  - **Done when:** `ls` works with an unformatted file in the tree, and `git commit` with that file staged is still blocked.
+
+### Phase 0B — CI exposure
+
+- [ ] **M0.3 — Integration tests must not run fork PR code on the self-hosted runner** · Crit
+  - **Files:** `.github/workflows/integration.yml`
+  - **Problem:** The workflow triggers on `pull_request` and runs on `[self-hosted, libvirt]`, a machine with libvirt and sudo. Any fork PR runs arbitrary code there.
+  - **Fix:** Trigger on `push` to `main` and `workflow_dispatch` only, or gate PR runs behind a protected `environment` that requires manual approval. Also add `if: github.event.pull_request.head.repo.full_name == github.repository`.
+  - **Done when:** A PR opened from a fork does not start a job on the self-hosted runner.
+
+### Phase 0C — Host data loss and privilege
+
+- [ ] **M0.4 — `destroy` must never `RemoveAll` an arbitrary directory** · Crit
+  - **Files:** `cmd/vmherd/destroy.go:47,54`, `internal/config/project.go` (`resolveStateDir`)
+  - **Problem:** `os.RemoveAll(project.StateDir)` is called on the raw `VMHERD_STATE_DIR` value. With `VMHERD_STATE_DIR=$HOME`, `vmherd destroy` deletes the home directory. The per-VM `RemoveAll` error is also discarded with `_ =`.
+  - **Fix:** Write a marker file (for example `.vmherd-state`) when creating a state directory. Refuse to delete a directory without the marker, and delete only the files and subdirectories vmherd creates (`id_ed25519*`, `<vm>/`, `network/`, `state.json`). Return or log every error.
+  - **Done when:** A unit test proves `destroy` leaves a directory without the marker untouched, and that removal errors are reported.
+
+- [ ] **M0.5 — Harden shared-folder host-path validation** · Crit
+  - **Files:** `internal/config/parse.go:49,264-301`
+  - **Problem:** The forbidden list misses `/` itself, `/home`, `/var`, `/opt`, `/dev`, `/run`, `/srv` and `/mnt`, plus the user's `$HOME` root. Symlinks aren't resolved, so `./link → /etc` passes.
+  - **Fix:** Run `filepath.EvalSymlinks` on the resolved path. Reject `/`, `$HOME` exactly, and the system prefixes. Prefer allowing only paths under the project directory or under `$HOME`, with an explicit opt-out flag for other paths.
+  - **Done when:** Table-driven tests reject `/`, `~`, `/var/x`, and a symlink to `/etc`, and accept `.` and `./src`.
+
+- [ ] **M0.6 — Remove the `chmod o+rwx` fallback** · Crit
+  - **Files:** `internal/vm/shared.go:25-33`
+  - **Problem:** When `setfacl` fails, vmherd runs `sudo chmod o+rwx` on the host path. That makes the project directory (or worse, see M0.5) world-writable without the user noticing.
+  - **Fix:** If `setfacl` fails, return an actionable error ("install the `acl` package or run `setfacl -m u:<qemu>:rwx <path>`"). Never widen permissions to "other". Also check that QEMU can traverse the parent directories (home directories are often `0750`).
+  - **Done when:** No `chmod` call remains in `shared.go`, and the error message names the exact command to run.
+
+- [ ] **M0.7 — 🧭 Decide on the implicit `.` → `/vagrant` share** · High
+  - **Files:** `internal/config/parse.go:97-101`, README, `ExampleHerdfile`
+  - **Problem:** Every VM silently mounts the project directory with write access for QEMU, even if the user never asked for it.
+  - **Decision:** Keep it as the default (Vagrant compatibility, documented clearly), or make it opt-in (`shared_folders: default`).
+  - **Done when:** The decision is recorded in CLAUDE.md, the code matches it, and README documents it.
+
+- [ ] **M0.8 — Make libvirt domain and disk names project-unique, and validate the project name** · High
+  - **Files:** `internal/config/project.go:103-110`, all callers of `DomainName`/`DiskPath`
+  - **Problem:** Names use only `filepath.Base(dir)`, so `~/a/web` and `~/b/web` share domains and disks, and `destroy` in one wipes the other. The directory name isn't validated, so a comma injects options into `virt-install --disk path=...,format=qcow2`.
+  - **Fix:** Use `vmherd-<project>-<shortHash>-<vm>` (the same hash as the state directory), and sanitize the project part to `[a-z0-9-]`. For migration, if the old-style domain exists and the new one doesn't, keep using the old name (record it in `state.json` once M2.1 lands).
+  - **Done when:** A unit test shows two projects with the same basename get different domain names. A directory name containing a comma or space produces a valid name.
+
+- [ ] **M0.9 — Remove the committed binary** · Low
+  - **Files:** `vmherd-linux-amd64`, `.gitignore`
+  - **Problem:** A 10 MB binary was committed in `6280642 fixes`, and `.gitignore` covers only `/vmherd`.
+  - **Fix:** Run `git rm --cached vmherd-linux-amd64` and add `/vmherd-*` and `/dist/` to `.gitignore`. 🧭 Rewriting history to purge the blob is the maintainer's call.
+  - **Done when:** `git ls-files | grep vmherd-linux` is empty.
+
+---
+
+## M1 — Correctness of existing features
+
+### Phase 1A — Broken features
+
+- [ ] **M1.1 — Fix command quoting for `provision`, `ssh --` and `scp`** · High
+  - **Files:** `internal/ssh/connect.go:27`, `cmd/vmherd/provision.go:102,120,126`
+  - **Problem:** `Connect` joins `["bash","-c",inline]` with spaces, so the remote shell re-splits it: `apt-get update && …` runs `bash -c apt-get`. Provision steps also run as the SSH user, while first-boot `runcmd` runs as root. `vmherd ssh vm -- ls "/a b"` loses quoting. The `chmod` destination is unquoted, and the comment says "sets it executable" while the code sets `0644`.
+  - **Fix:** Run shell steps as `ssh … sudo bash -s` with the script on stdin. Quote user `ssh --` arguments for POSIX shells (`'…'` with escaped `'`). Quote the scp/chmod remote path. Make the comment match the permission (or make it configurable).
+  - **Done when:** A unit test checks the argv built for a multi-line inline script, and on the testbed `vmherd provision` runs `apt-get update && apt-get install -y curl` successfully.
+
+- [ ] **M1.2 — 🔬 Default subnet collides with libvirt's `default` network** · High
+  - **Files:** `internal/config/parse.go:82`, `internal/config/project.go` (`ExampleHerdfile`), README, CLAUDE.md
+  - **Problem:** The default and example subnet is `192.168.122.0/24`, which is the stock libvirt `default` network, so `checkSubnetConflict` should reject `vmherd init && vmherd up` on a stock host.
+  - **Verify:** Run `vmherd init && vmherd up` on a host where `virsh net-list` shows `default`.
+  - **Fix:** Pick a different default (for example `192.168.150.0/24`), or auto-select the first free /24 from a pool and record it in `state.json`.
+  - **Done when:** `init` then `up` works on a stock libvirt host.
+
+- [ ] **M1.3 — 🔬 Port forwarding works and binds to localhost by default** · High
+  - **Files:** `internal/portfwd/portfwd.go`
+  - **Problem:** OUTPUT DNAT to `-d localhost` needs `net.ipv4.conf.all.route_localnet=1`. libvirt's NAT FORWARD rules reject new inbound connections to guests, so PREROUTING DNAT alone shouldn't work. Rules also have no `-i`/`-d` limit, so ports are exposed to the whole LAN. `CheckExistingNATRule` swallows errors. A partial `Setup` doesn't roll back. `CheckBackend` and `Setup` duplicate the backend switch.
+  - **Verify:** On the testbed, forward 8080→80 to nginx, then `curl localhost:8080` on the host and `curl <host-ip>:8080` from another machine.
+  - **Fix:** Insert matching FORWARD ACCEPT rules. Either enable `route_localnet` scoped to the bridge, or use a small userspace TCP proxy for localhost. Add an optional `host_ip` field, defaulting to `127.0.0.1`. Roll back on partial failure, and extract the backend check into one helper.
+  - **Done when:** Both curl checks behave as documented, and `destroy` leaves no vmherd rules in `iptables-save`.
+
+- [ ] **M1.4 — A VM without `network.ip` gets invalid cloud-init** · High
+  - **Files:** `internal/cloudinit/cloudinit.go:162-180`, `internal/config/parse.go`, `cmd/vmherd/up.go`
+  - **Problem:** With an empty IP, network-config contains `addresses: - /24`. The VM boots with no network, and `up` still reports success (it just skips SSH).
+  - **Fix:** Either make `ip` required at validation, or auto-assign a free address outside the DHCP pool and persist it (needs M2.1).
+  - **Done when:** A Herdfile without `ip` either fails validation with an actionable error, or produces a reachable VM.
+
+### Phase 1B — Lifecycle reliability
+
+- [ ] **M1.5 — Graceful stop by polling, not a fixed 5-second sleep** · Med
+  - **Files:** `cmd/vmherd/down.go:49`, `restart.go:96`, `reload.go:129`
+  - **Problem:** All three sleep 5 seconds and then force-stop, which can lose data. The logic is copied three times with three identical constants.
+  - **Fix:** Add one helper in `internal/vm`, `StopGracefully(domain string, timeout time.Duration) error`, that polls state with backoff and force-stops after a named `gracefulShutdownTimeout` (for example 60s). Use it in all three commands.
+  - **Done when:** The three `time.Sleep` calls and duplicate constants are gone.
+
+- [ ] **M1.6 — `State()` reports errors and maps every libvirt state** · Med
+  - **Files:** `internal/vm/vm.go:13-23,130-166`
+  - **Problem:** Any virsh failure (libvirtd down, sudo fails) shows as "not created". `paused`, `crashed`, `in shutdown` and `pmsuspended` are treated as missing VMs, so `up` tries to create them. `ForceStop` returns an unwrapped error. `Exists` duplicates `State`.
+  - **Fix:** Change the signature to `State(domain) (VMState, error)` and distinguish "domain not found" from other errors. Add typed constants for every virsh state, and define behaviour per state in `up`, `down` and `restart`. Wrap the `ForceStop` error.
+  - **Done when:** `vmherd status` with libvirtd stopped prints an actionable error instead of "not created".
+
+- [ ] **M1.7 — Non-zero exit code on partial failure** · Med
+  - **Files:** `cmd/vmherd/up.go:155-160,311-318`, `destroy.go`, `portfwd_helpers.go:26`, `reload.go:102`
+  - **Problem:** Failed VM creations (when at least one succeeds), destroy warnings, port-forward failures and SSH timeouts all exit 0.
+  - **Fix:** Collect the errors with `errors.Join` and return them at the end so the exit code is 1, while still processing every VM.
+  - **Done when:** A test (after M2.3) or a manual check shows `up` exits 1 when one of two VMs fails.
+
+- [ ] **M1.8 — Wait for cloud-init to finish and surface failures** · Med
+  - **Files:** `cmd/vmherd/up.go` (`waitForSSHInParallel`), `internal/ssh`
+  - **Problem:** `up` prints "ready" once SSH answers, while `runcmd` provisioning may still be running or may have failed.
+  - **Fix:** After SSH is ready, run `cloud-init status --wait` (with a named timeout), and print a non-`done` status as an error. Point the user to `vmherd console-log` / `/var/log/cloud-init-output.log`.
+  - **Done when:** A Herdfile with a failing shell step makes `up` exit non-zero with the failing step visible.
+
+### Phase 1C — Herdfile validation
+
+- [ ] **M1.9 — Strict YAML and collect all validation errors** · Med
+  - **Files:** `internal/config/parse.go:52-175`
+  - **Problem:** Unknown keys (`memroy:`) are silently ignored. Validation stops at the first error, while CLAUDE.md requires reporting all of them.
+  - **Fix:** Use `yaml.NewDecoder` with `KnownFields(true)`. Have `validate` collect errors into a slice and return `errors.Join`.
+  - **Done when:** A test Herdfile with three distinct errors reports all three, and an unknown key is reported with its line number.
+
+- [ ] **M1.10 — Range, enum and format checks for every field** · Med
+  - **Files:** `internal/config/parse.go`, `internal/config/config.go`
+  - **Problem:** Negative `cpus` or `memory` are accepted. An unknown provision `type` is accepted at parse time (only `provision` rejects it later). An empty shell `inline`, a relative `destination`, and non-IP `gateway` or `dns` values reach cloud-init unvalidated, which allows YAML injection.
+  - **Fix:** Validate `cpus >= 1`, `memory >= 256`, provision type in an enum, `destination` absolute with no newlines, `gateway` an IPv4 address inside the subnet, and `dns` either `auto` or an IP address.
+  - **Done when:** There's a table-driven test case for each rule.
+
+- [ ] **M1.11 — Correct the provision source escape check** · Low
+  - **Files:** `internal/config/parse.go:316-319`
+  - **Problem:** `strings.HasPrefix(cleanPath, projectDir)` accepts `../proj-evil/x` when the project is `/…/proj`. Symlinks aren't resolved.
+  - **Fix:** Use `filepath.Rel` plus `EvalSymlinks`, and reject when the relative path starts with `..`.
+  - **Done when:** A test covers the sibling-prefix case.
+
+---
+
+## M2 — Structure: state, abstractions, deduplication
+
+### Phase 2A — Persistent project state
+
+- [ ] **M2.1 — Introduce `state.json` per project** · Med
+  - **Files:** new `internal/state/`, `cmd/vmherd/*`
+  - **Problem:** There's no record of what vmherd created. CLAUDE.md promises `state.json`, but it doesn't exist.
+  - **Fix:** A JSON file in the state directory, with a schema version and, per VM: domain name, MAC, IP, disk path, image URL and hash, port rules installed, and creation time. Write it atomically (temp file + rename) and guard it with a file lock.
+  - **Done when:** `up` writes it, `destroy` reads it, and the round-trip is unit-tested.
+
+- [ ] **M2.2 — Tear down from recorded state; clean up orphans** · Med
+  - **Depends on:** M2.1
+  - **Files:** `cmd/vmherd/portfwd_helpers.go`, `destroy.go`, `up.go`
+  - **Problem:** Port-forward teardown is computed from the *current* Herdfile, so changing ports leaks iptables rules. VMs removed from the Herdfile can never be destroyed by vmherd.
+  - **Fix:** Tear down the rules recorded in state. Have `up` warn about orphaned VMs, and let `destroy` (with no args) remove them.
+  - **Done when:** Changing a port and running `up` leaves exactly one rule, and removing a VM from the Herdfile followed by `destroy` removes its domain.
+
+### Phase 2B — Abstractions and deduplication
+
+- [ ] **M2.3 — A command-runner / `Hypervisor` interface so `cmd/` and `libvirt/` can be tested** · Med
+  - **Files:** `internal/libvirt/virsh.go`, `internal/vm`, `internal/network`, `internal/portfwd`, `cmd/vmherd`
+  - **Problem:** `exec.Command` is called directly everywhere. `cmd/` and `internal/libvirt` have 0% coverage, network ~20%, vm ~31%.
+  - **Fix:** Define a `CommandRunner` interface (with a real implementation and a fake for tests) and a `Hypervisor` interface (`DomainState`, `Start`, `Shutdown`, `Destroy`, `NetworkEnsure`…). Inject them explicitly, with no package globals.
+  - **Done when:** `up`, `down` and `destroy` have unit tests using the fake, and total coverage reaches ≥ 60%.
+
+- [ ] **M2.4 — Remove duplicated code** · Med
+  - **Files:** `cmd/vmherd/up.go:221-275` vs `reload.go:146-203`, `internal/network/network.go` (`net-list` parsing ×4), `up.go`/`reload.go` (password warning, key setup), `portfwd.go` (backend switch ×2)
+  - **Problem:** These near-duplicates violate CLAUDE.md's no-duplication rule.
+  - **Fix:** Add one `lifecycle.CreateVM(...)` used by both `up` and `reload`, one `listNetworks()` helper, and one `prepareProjectSSH()` helper.
+  - **Done when:** A `dupl` linter at threshold 100 reports nothing (see M4.2).
+
+- [ ] **M2.5 — Remove global mutable UI state** · Low
+  - **Files:** `internal/ui/ui.go`, `internal/image/download.go:350-360`
+  - **Problem:** `ui.quiet` is a package-level mutable variable, which CLAUDE.md forbids. `progressReader` prints with `fmt.Printf` directly, bypassing quiet mode and garbling parallel output.
+  - **Fix:** Add a `ui.Printer` struct passed through the code, and route the progress output through it.
+  - **Done when:** `ui` has no package-level `var`.
+
+- [ ] **M2.6 — Generate cloud-init from typed structs** · Med
+  - **Files:** `internal/cloudinit/cloudinit.go`
+  - **Problem:** YAML is built by string concatenation (CLAUDE.md asks for templates). Go's `%q` is not YAML escaping. Guest paths are interpolated unquoted into `bash -c "mkdir -p %s"`.
+  - **Fix:** Define structs for user-data, network-config and meta-data and `yaml.Marshal` them, which guarantees escaping. Use argv-form `runcmd` (`["mkdir","-p",path]`). Use the actual subnet prefix instead of a hardcoded `/24`.
+  - **Done when:** Existing golden tests pass, and a new test with quotes, newlines and spaces in paths produces valid YAML.
+
+### Phase 2C — Privilege and libvirt access
+
+- [ ] **M2.7 — 🧭 Decide between `virsh` and `go-libvirt`; align CLAUDE.md** · Med
+  - **Problem:** CLAUDE.md mandates `libvirt-go` bindings, which need cgo and would break the `CGO_ENABLED=0` static release build. The code shells out to `virsh` everywhere.
+  - **Options:** (a) `github.com/digitalocean/go-libvirt` (pure Go, RPC over the libvirt socket); (b) keep `virsh` behind the M2.3 interface and change the rule.
+  - **Done when:** The decision is recorded in CLAUDE.md, and the rule there matches reality.
+
+- [ ] **M2.8 — Stop using `sudo` for libvirt calls** · Med
+  - **Files:** `internal/libvirt/virsh.go`, `internal/vm/vm.go`, `internal/network/network.go`
+  - **Problem:** Every `virsh`, `qemu-img` and `test` call goes through `sudo` without `-n`. Parallel operations can block on password prompts, and the privilege is far broader than needed.
+  - **Fix:** Use `virsh -c qemu:///system` with `libvirt` group membership (and check it up front with an actionable error). Keep `sudo -n` only for iptables, setfacl and writes under `/var/lib/libvirt/images`, or create disks through a libvirt storage pool.
+  - **Done when:** `grep -rn '"sudo", "virsh"'` returns nothing, and a missing group membership produces a clear error.
+
+- [ ] **M2.9 — Small cleanups** · Low
+  - **Files:**
+    - `internal/image/download.go:372` (`parseChecksum`, used only by tests)
+    - `internal/image/registry.go:70,138` (variant map rebuilt on every call; custom insertion sort)
+    - `internal/config/project.go:66,70,150` (`resolveStateDir` swallows errors; `ImageCacheDir` falls back to the world-writable `/tmp`)
+    - every remaining `_ = fn()` on a call that returns an error
+  - **Fix:**
+    - Delete the dead code.
+    - Make the variant map package-level.
+    - Replace the custom sort with `slices.Sort`.
+    - Return errors instead of falling back silently.
+    - Never cache images under `/tmp`.
+  - **Done when:** `errcheck` with blank-assignment checking is clean (see M4.2).
+
+---
+
+## M3 — Supply chain, SSH trust, CI
+
+### Phase 3A — Image download and verification
+
+- [ ] **M3.1 — A hardened HTTP client** · Med
+  - **Files:** `internal/image/download.go`
+  - **Problem:** `http.Get` has no timeout or context, so it can hang forever. Redirects can downgrade to `http://`. `out.Close()` errors are ignored, so a short write can be renamed into the cache. Hash comparison is case-sensitive. The `//nolint:noctx // built-in registry` comments are false, because URLs come from the Herdfile.
+  - **Fix:**
+    - Add one `http.Client` with dial, TLS and idle timeouts, plus a `CheckRedirect` that rejects non-HTTPS targets.
+    - Pass a `context.Context` from the CLI so Ctrl-C cancels the download.
+    - `fsync` and check `Close` before the rename.
+    - Compare hashes with `strings.EqualFold`.
+    - Remove the misleading `nolint` comments.
+  - **Done when:** `httptest` cases cover the timeout, the HTTPS→HTTP redirect, and an uppercase checksum.
+
+- [ ] **M3.2 — Make the cache safe under concurrent use** · Low
+  - **Files:** `internal/image/download.go:33,330`
+  - **Problem:** `cleanStaleTempFiles` deletes *every* `*.tmp` file, including a download in progress from another `vmherd` process (for example `pull` in a second terminal).
+  - **Fix:** Take a per-image lock file (`flock`). Only delete stale temp files whose lock isn't held.
+  - **Done when:** Two parallel `vmherd pull ubuntu:noble` runs both succeed.
+
+- [ ] **M3.3 — Verify vendor signatures; allow pinned checksums** · High
+  - **Files:** `internal/image/`, `internal/config/config.go`
+  - **Problem:** The checksum file comes from the same host as the image (by scraping the directory listing), so verification only detects corruption, not tampering. CLAUDE.md promises GPG verification, but there is none.
+  - **Fix:** Embed vendor signing keys and verify `SHA256SUMS.gpg` (Ubuntu), the clearsigned `CHECKSUM` (Fedora) and `SHA512SUMS.sign` (Debian) with an OpenPGP library. Also support a pinned `sha256:` per image in the Herdfile (`images: { ubuntu:noble: { url: …, sha256: … } }`), and have `vmherd pull` print the hash so users can pin it.
+  - **Done when:** A tampered checksum file fails verification in tests, and a pinned hash overrides discovery.
+
+- [ ] **M3.4 — 🧭 Decide the image registry model** · Med
+  - **Problem:** CLAUDE.md says "built-in registry, no user URLs"; the code requires an `images:` map of URLs in the Herdfile.
+  - **Recommendation:** Built-in defaults (signed vendor sources) that a Herdfile can override, with overrides required to be HTTPS and either signed or pinned.
+  - **Done when:** The decision is recorded in CLAUDE.md, and the code and README match it.
+
+- [ ] **M3.5 — Refresh cached images from mutable URLs** · Low
+  - **Files:** `internal/image/download.go:19-39`
+  - **Problem:** `…/noble/current/…` changes over time, but the cache is keyed only by distro, codename and filename, so it never refreshes. An image is verified once and then trusted forever.
+  - **Fix:** Store the verified hash and the source checksum file's ETag or Last-Modified next to the image. Have `pull` re-check, and have `up` re-hash only on demand (`--verify`).
+  - **Done when:** `vmherd pull` fetches a new image after the vendor updates `current/`.
+
+### Phase 3B — SSH trust
+
+- [ ] **M3.6 — Pin VM host keys** · Med
+  - **Files:** `internal/ssh/connect.go:40-43,92-100`, `internal/cloudinit`
+  - **Problem:** `StrictHostKeyChecking=no` with `UserKnownHostsFile=/dev/null` disables host verification for every connection.
+  - **Fix:** Generate the guest's host key on the host, inject it through cloud-init `ssh_keys`, and write a per-project `known_hosts`. Then use `StrictHostKeyChecking=yes` with that file.
+  - **Done when:** `vmherd ssh` fails if the guest's host key changes.
+
+### Phase 3C — CI and release
+
+- [ ] **M3.7 — 🧭 SPDX headers and DCO sign-off: enforce or remove** · Med
+  - **Files:** `.github/workflows/pr-quality.yml`, all `.go` files
+  - **Problem:** 0 of 47 Go files have SPDX headers and no commit is signed off, so the PR Quality checks can never pass.
+  - **Fix:** Either add `// SPDX-License-Identifier: AGPL-3.0-or-later` to every file and commit with `-s`, or remove the jobs.
+  - **Done when:** PR Quality is green on a fresh PR.
+
+- [ ] **M3.8 — Fix the `pr-security` workflow** · Med
+  - **Files:** `.github/workflows/pr-security.yml`
+  - **Problem:** `if: contains(github.event.pull_request.changed_files_url, 'go.mod')` tests an API URL, so the dependency audit never runs. The secret-scan pipeline (`grep -qv '#'`) has inverted, unreliable logic.
+  - **Fix:** Use `dorny/paths-filter` (pinned SHA), or always run `go mod verify` and `govulncheck`, since they're cheap. Replace the grep with `gitleaks` (pinned).
+  - **Done when:** A PR that changes `go.mod` triggers the audit job.
+
+- [ ] **M3.9 — Gate releases on tests; add provenance and an SBOM** · Med
+  - **Files:** `.github/workflows/release.yml`
+  - **Problem:** A tag push builds and publishes without running tests. There's no build provenance or SBOM.
+  - **Fix:** Add a `test` job that `build` depends on. Add `actions/attest-build-provenance` and an SBOM (`anchore/sbom-action`), all pinned to SHAs. Publish one `SHA256SUMS` file for all archives.
+  - **Done when:** A release created from a commit with failing tests is blocked, and attestations appear on the release.
+
+- [ ] **M3.10 — Coverage threshold** · Low
+  - **Files:** `.github/workflows/pr-quality.yml`
+  - **Problem:** The 30% threshold is too low to catch regressions.
+  - **Fix:** Raise it step by step as M2.3 lands (40 → 50 → 60%).
+  - **Done when:** The threshold is ≥ 60%.
+
+---
+
+## M4 — LLM infrastructure (`CLAUDE.md`, `.claude/`)
+
+- [ ] **M4.1 — Rewrite CLAUDE.md to describe the current code** · High
+  - **Files:** `CLAUDE.md`, new `docs/ROADMAP.md`, new `docs/ARCHITECTURE.md`
+  - **Problem:** CLAUDE.md describes features that don't exist (built-in registry, `state.json`, libvirt-go, `text/template`, report-all-errors). Its structure section omits `portfwd/`, `ui/` and `libvirt/`, and its CLI list omits `reload`, `provision`, `info` and `console-log`. Agents are steered by fiction.
+  - **Fix:** Keep CLAUDE.md short and current:
+    - what exists today
+    - build, test and lint commands
+    - integration tests on the testbed (`-tags integration`, binary deployed as `vmherd-new`)
+    - the release flow (`scripts/release.sh`)
+    - a **security model** section (the Herdfile is untrusted input; host-side effects need validation)
+    - rules, each linked to the linter that enforces it
+
+    Move product plans to `docs/ROADMAP.md` and the design to `docs/ARCHITECTURE.md`. Record the 🧭 decisions from M0.7, M2.7 and M3.4.
+  - **Done when:** Every statement in CLAUDE.md can be checked against the code.
+
+- [ ] **M4.2 — Enforce the style rules with `.golangci.yml`** · Med
+  - **Files:** new `.golangci.yml`, `.github/workflows/test.yml`
+  - **Problem:** The CLAUDE.md rules are prose only. golangci-lint runs with defaults and reports "0 issues" despite violations.
+  - **Fix:** Enable `funlen` (80 lines), `errcheck` (`check-blank: true`), `revive` (exported comments, receiver naming), `mnd`, `dupl`, `gosec`, `noctx`, `wrapcheck`, `varnamelen` and `gocognit`. Fix the violations package by package. This item can be pulled forward and enabled per linter as other items land.
+  - **Done when:** CI runs with this config, and CLAUDE.md maps each rule to its linter.
+
+- [ ] **M4.3 — Fix the project skills' layout** · High
+  - **Files:** `.claude/skills/*.md`
+  - **Problem:** Skills are flat `.md` files, but Claude Code only loads `.claude/skills/<name>/SKILL.md` with `name` and `description` frontmatter, so none of the four load. Three have no frontmatter at all.
+  - **Fix:** Move `commit`, `test` and `reduce-comments` to `<name>/SKILL.md` with frontmatter. Delete `improve`, which only repeats CLAUDE.md. Have the `commit` skill state the project's commit rules (no Co-Authored-By, no amend, no push).
+  - **Done when:** The skills appear in Claude Code's skill list.
+
+- [ ] **M4.4 — Consolidate and correct the agents** · Med
+  - **Files:** `.claude/agents/*.md`
+  - **Problems:**
+    - There are 10 overlapping agents (code-quality, code-reviewer, refactoring and security all review code).
+    - They hardcode `/Users/boyadboz/REPOS/vmherd`.
+    - They copy the CLAUDE.md rules, and the copies already differ ("exported functions" vs. "every function").
+    - The security agent's threat model is wrong (it lists wget/curl and cloud-localds, which aren't used, and says URLs come from a built-in registry).
+    - Read-only "never modify" agents have shell access.
+    - The haiku-model technical-writer is allowed to edit CLAUDE.md.
+  - **Fix:** Reduce to about five agents: `implementer`, `reviewer` (covering correctness, security and refactoring), `test-runner`, `devops` and `docs`.
+    - Use repo-relative paths.
+    - Have each agent say "follow CLAUDE.md" instead of copying the rules.
+    - Rewrite the threat model around the Herdfile as the trust boundary.
+    - Restrict reviewer tools.
+    - Make CLAUDE.md edits require a stronger model or human review.
+  - **Done when:** No absolute paths remain, and no rule text is duplicated from CLAUDE.md.
+
+- [ ] **M4.5 — Turn the memory rules into permission deny rules** · Med
+  - **Files:** `.claude/settings.json`
+  - **Problem:** "Never push", "never amend" and "no `rm -rf`" exist only as memory and prose, so nothing enforces them.
+  - **Fix:** Add `permissions.deny` entries: `Bash(git push*)`, `Bash(git commit --amend*)`, `Bash(rm -rf*)`, `Bash(git tag -d*)`, `Bash(git reset --hard*)`.
+  - **Done when:** Those commands are refused without a prompt.
+
+- [ ] **M4.6 — Archive old review files** · Low
+  - **Files:** `reviews/`
+  - **Problem:** Stale LLM review output ("ALL FIXED (pending commit)") lives next to the code and can mislead agents.
+  - **Fix:** Move it to `docs/reviews/archive/`, or delete it once this file supersedes it. Keep `checklist.md` only if it's updated to match CLAUDE.md.
+  - **Done when:** `reviews/` contains no stale status claims.
