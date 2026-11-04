@@ -45,9 +45,6 @@ var diskSizePattern = regexp.MustCompile(`^[0-9]+[KMGT]$`)
 // followed by lowercase letters, digits, hyphens, or underscores.
 var sshUserPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
-// forbiddenPathPrefixes lists system directories that shared folder host paths must not resolve into.
-var forbiddenPathPrefixes = []string{"/etc", "/root", "/var/lib", "/usr", "/bin", "/sbin", "/sys", "/proc", "/boot"}
-
 // Load reads and parses a Herdfile from the given directory.
 func Load(dir string) (*Herdfile, error) {
 	path := filepath.Join(dir, HerdfileName)
@@ -259,10 +256,11 @@ func validateVMIPAddress(vmConfig VM, subnet string, usedIPs map[string]string) 
 	return nil
 }
 
-// validateSharedFolders checks shared folder paths for emptiness, absolute guest paths,
-// and forbidden system directory targets.
+// validateSharedFolders checks shared folder paths for emptiness, absolute guest
+// paths and the host-path policy, and records each resolved host path in
+// ResolvedHost (the slice shares its backing array with the Herdfile).
 func validateSharedFolders(vmConfig VM, projectDir string) error {
-	for _, sharedFolder := range vmConfig.SharedFolders {
+	for folderIndex, sharedFolder := range vmConfig.SharedFolders {
 		if sharedFolder.Host == "" {
 			return fmt.Errorf("VM %q: shared_folders entry has empty 'host' path", vmConfig.Name)
 		}
@@ -273,31 +271,13 @@ func validateSharedFolders(vmConfig VM, projectDir string) error {
 			return fmt.Errorf("VM %q: shared_folders guest path %q must be absolute (start with /)", vmConfig.Name, sharedFolder.Guest)
 		}
 
-		resolvedHostPath := resolveHostPath(sharedFolder.Host, projectDir)
-		if isForbiddenSystemPath(resolvedHostPath) {
-			return fmt.Errorf("VM %q: shared_folders host path %q resolves to forbidden system directory %q — choose a path outside system directories", vmConfig.Name, sharedFolder.Host, resolvedHostPath)
+		resolvedHostPath, err := resolveSharedFolderHostPath(sharedFolder.Host, projectDir, sharedFolder.AllowOutsideHome)
+		if err != nil {
+			return fmt.Errorf("VM %q: shared_folders host path %q %w", vmConfig.Name, sharedFolder.Host, err)
 		}
+		vmConfig.SharedFolders[folderIndex].ResolvedHost = resolvedHostPath
 	}
 	return nil
-}
-
-// resolveHostPath converts a host path to an absolute path for validation.
-// Relative paths are joined with the project directory.
-func resolveHostPath(hostPath string, projectDir string) string {
-	if filepath.IsAbs(hostPath) {
-		return filepath.Clean(hostPath)
-	}
-	return filepath.Clean(filepath.Join(projectDir, hostPath))
-}
-
-// isForbiddenSystemPath checks whether a resolved path falls under any forbidden system directory.
-func isForbiddenSystemPath(resolvedPath string) bool {
-	for _, prefix := range forbiddenPathPrefixes {
-		if resolvedPath == prefix || strings.HasPrefix(resolvedPath, prefix+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 // validateProvisionSteps checks that file-type provision sources are relative

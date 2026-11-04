@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
@@ -229,7 +228,7 @@ func createSingleVM(
 	ui.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
 		vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
-	sharedMounts := buildSharedMounts(project.Dir, vmConfig)
+	sharedMounts := buildSharedMounts(vmConfig)
 
 	macAddress, err := vm.GenerateMACAddress()
 	if err != nil {
@@ -319,17 +318,13 @@ func waitForSSHInParallel(vms []config.VM, keyPath, sshUser string) {
 }
 
 // buildSharedMounts converts Herdfile shared folder config into vm.SharedFolderMount
-// structs with resolved absolute host paths and generated mount tags.
-func buildSharedMounts(projectDir string, vmConfig config.VM) []vm.SharedFolderMount {
+// structs using the host paths resolved and checked during Herdfile validation.
+func buildSharedMounts(vmConfig config.VM) []vm.SharedFolderMount {
 	var mounts []vm.SharedFolderMount
 	for i, sf := range vmConfig.SharedFolders {
-		hostPath := sf.Host
-		if !filepath.IsAbs(hostPath) {
-			hostPath = filepath.Join(projectDir, hostPath)
-		}
 		mountTag := fmt.Sprintf("vmherd_share_%d", i)
 		mounts = append(mounts, vm.SharedFolderMount{
-			HostPath:  hostPath,
+			HostPath:  sf.ResolvedHost,
 			GuestPath: sf.Guest,
 			MountTag:  mountTag,
 		})

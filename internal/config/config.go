@@ -24,8 +24,10 @@ type VM struct {
 
 // SharedFolder maps a host directory into the guest filesystem.
 type SharedFolder struct {
-	Host  string `yaml:"host"`  // path on the host (relative to project dir)
-	Guest string `yaml:"guest"` // absolute mount path inside the guest
+	Host             string `yaml:"host"`               // path on the host (relative to project dir)
+	Guest            string `yaml:"guest"`              // absolute mount path inside the guest
+	AllowOutsideHome bool   `yaml:"allow_outside_home"` // permit a host path outside the project dir and $HOME
+	ResolvedHost     string `yaml:"-"`                  // absolute, symlink-free host path set during validation
 }
 
 // PortForward maps a host port to a guest port.

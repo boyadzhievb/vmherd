@@ -138,7 +138,7 @@ ssh:
 | `disk` | 20G | Disk size |
 | `network.ip` | — | Static IP address |
 | `network.gateway` | subnet .1 | Gateway IP |
-| `shared_folders` | `[{host: ".", guest: "/vagrant"}]` | Host directories shared via 9p virtio |
+| `shared_folders` | `[{host: ".", guest: "/vagrant"}]` | Host directories shared via 9p virtio. `host` must resolve (symlinks included) inside the project directory or `$HOME`; set `allow_outside_home: true` on an entry to share another path. `/`, `$HOME` itself and system directories are always refused |
 | `ports` | — | Port forwards (`host`→`guest`, protocol: tcp/udp) |
 | `provision` | — | List of provisioning steps |
 

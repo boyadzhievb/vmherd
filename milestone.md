@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 4 |
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 5 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -57,7 +57,7 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** Write a marker file (for example `.vmherd-state`) when creating a state directory. Refuse to delete a directory without the marker, and delete only the files and subdirectories vmherd creates (`id_ed25519*`, `<vm>/`, `network/`, `state.json`). Return or log every error.
   - **Done when:** A unit test proves `destroy` leaves a directory without the marker untouched, and that removal errors are reported.
 
-- [ ] **M0.5 — Harden shared-folder host-path validation** · Crit
+- [x] **M0.5 — Harden shared-folder host-path validation** · Crit
   - **Files:** `internal/config/parse.go:49,264-301`
   - **Problem:** The forbidden list misses `/` itself, `/home`, `/var`, `/opt`, `/dev`, `/run`, `/srv` and `/mnt`, plus the user's `$HOME` root. Symlinks aren't resolved, so `./link → /etc` passes.
   - **Fix:** Run `filepath.EvalSymlinks` on the resolved path. Reject `/`, `$HOME` exactly, and the system prefixes. Prefer allowing only paths under the project directory or under `$HOME`, with an explicit opt-out flag for other paths.
