@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 2 |
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 3 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -43,7 +43,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 0B — CI exposure
 
-- [ ] **M0.3 — Integration tests must not run fork PR code on the self-hosted runner** · Crit
+- [x] **M0.3 — Integration tests must not run fork PR code on the self-hosted runner** · Crit
   - **Files:** `.github/workflows/integration.yml`
   - **Problem:** The workflow triggers on `pull_request` and runs on `[self-hosted, libvirt]`, a machine with libvirt and sudo. Any fork PR runs arbitrary code there.
   - **Fix:** Trigger on `push` to `main` and `workflow_dispatch` only, or gate PR runs behind a protected `environment` that requires manual approval. Also add `if: github.event.pull_request.head.repo.full_name == github.repository`.
