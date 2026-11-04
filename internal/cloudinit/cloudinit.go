@@ -25,7 +25,8 @@ type SharedMount struct {
 }
 
 // GenerateFiles creates the cloud-init configuration files for a VM.
-func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer, macAddress string, sharedMounts []SharedMount) (*Files, error) {
+// sshUserUID sets the SSH user's UID (0 keeps the guest's default allocation).
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer, macAddress string, sharedMounts []SharedMount, sshUserUID int) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
@@ -36,7 +37,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKe
 		gateway = subnetBase + ".1"
 	}
 
-	if err := writeUserData(seedDir, vm, sshUser, sshPassword, sshPubKey, sharedMounts); err != nil {
+	if err := writeUserData(seedDir, vm, sshUser, sshPassword, sshPubKey, sharedMounts, sshUserUID); err != nil {
 		return nil, err
 	}
 	if err := writeNetworkConfig(seedDir, vm.Network.IP, gateway, dnsServer, macAddress); err != nil {
@@ -54,13 +55,17 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKe
 }
 
 // writeUserData generates the cloud-init user-data file with users, packages, and provisioning.
-func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKey string, sharedMounts []SharedMount) error {
+// A non-zero sshUserUID pins the SSH user's UID (matching the host user for shared folders).
+func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKey string, sharedMounts []SharedMount, sshUserUID int) error {
 	var builder strings.Builder
 	builder.WriteString("#cloud-config\n")
 	fmt.Fprintf(&builder, "hostname: %s\n", vm.Name)
 	builder.WriteString("manage_etc_hosts: true\n")
 	builder.WriteString("users:\n")
 	fmt.Fprintf(&builder, "  - name: %s\n", sshUser)
+	if sshUserUID != 0 {
+		fmt.Fprintf(&builder, "    uid: %d\n", sshUserUID)
+	}
 	builder.WriteString("    sudo: ALL=(ALL) NOPASSWD:ALL\n")
 	builder.WriteString("    shell: /bin/bash\n")
 	if userPassword != "" {
@@ -141,6 +146,11 @@ func writeRuncmdEntries(builder *strings.Builder, runcmds []string) {
 	}
 }
 
+// sharedMountOptions are the guest mount options for 9p shared folders. nofail
+// keeps the guest booting if a share is missing; noatime avoids a host write on
+// every read.
+const sharedMountOptions = "trans=virtio,version=9p2000.L,noatime,nofail"
+
 // writeSharedMountEntries appends runcmd and mounts entries for 9p shared folders.
 func writeSharedMountEntries(builder *strings.Builder, sharedMounts []SharedMount, hasProvisionRuncmds bool) {
 	if !hasProvisionRuncmds {
@@ -148,13 +158,13 @@ func writeSharedMountEntries(builder *strings.Builder, sharedMounts []SharedMoun
 	}
 	for _, mount := range sharedMounts {
 		mkdirCommand := fmt.Sprintf("mkdir -p %s", mount.GuestPath)
-		mountCommand := fmt.Sprintf("mount -t 9p -o trans=virtio,version=9p2000.L %s %s", mount.MountTag, mount.GuestPath)
+		mountCommand := fmt.Sprintf("mount -t 9p -o %s %s %s", sharedMountOptions, mount.MountTag, mount.GuestPath)
 		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mkdirCommand)
 		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mountCommand)
 	}
 	builder.WriteString("mounts:\n")
 	for _, mount := range sharedMounts {
-		fmt.Fprintf(builder, "  - [%s, %s, 9p, \"trans=virtio,version=9p2000.L\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath)
+		fmt.Fprintf(builder, "  - [%s, %s, 9p, \"%s\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath, sharedMountOptions)
 	}
 }
 

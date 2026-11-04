@@ -230,6 +230,10 @@ func createSingleVM(
 
 	sharedMounts := buildSharedMounts(vmConfig)
 	announceSharedMounts(vmConfig.Name, sharedMounts)
+	shareIdentity, err := resolveShareIdentity(vmConfig.Name, sharedMounts)
+	if err != nil {
+		return err
+	}
 
 	macAddress, err := vm.GenerateMACAddress()
 	if err != nil {
@@ -239,7 +243,7 @@ func createSingleVM(
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
 		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, pubKey,
-		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts),
+		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
 	)
 	if err != nil {
 		return err
@@ -265,6 +269,7 @@ func createSingleVM(
 		ImagePath:          img.cachePath,
 		DiskSize:           vmConfig.Disk,
 		SharedFolders:      sharedMounts,
+		QEMUProcessLabel:   shareIdentity.qemuProcessLabel,
 		ConsoleLogPath:     consoleLogPath,
 	}); err != nil {
 		return err
@@ -331,6 +336,33 @@ func buildSharedMounts(vmConfig config.VM) []vm.SharedFolderMount {
 		})
 	}
 	return mounts
+}
+
+// shareIdentity says who QEMU runs as and which UID the guest SSH user gets
+// for a VM with shared folders. The zero value means "no shares, defaults".
+type shareIdentity struct {
+	qemuProcessLabel string // libvirt DAC label "+UID:+GID" for the QEMU process
+	sshUserUID       int    // guest SSH user UID matching the host user, 0 = guest default
+}
+
+// resolveShareIdentity runs QEMU as the host user (with the /dev/kvm group) for
+// VMs with shared folders, and gives the guest SSH user the host UID so files
+// have the same owner on both sides. VMs without shares keep libvirt's defaults.
+func resolveShareIdentity(vmName string, sharedMounts []vm.SharedFolderMount) (shareIdentity, error) {
+	if len(sharedMounts) == 0 {
+		return shareIdentity{}, nil
+	}
+	hostIdentity, err := vm.DetectHostIdentity()
+	if err != nil {
+		return shareIdentity{}, fmt.Errorf("preparing shared folders for %s: %w", vmName, err)
+	}
+	guestUID, uidUsable := hostIdentity.GuestUserUID()
+	if !uidUsable {
+		ui.Printf("Warning: host UID %d is outside the regular user range, so the SSH user in %s keeps its default UID; "+
+			"only root in the guest can write to shared folders — set 'shared_folders: []' if you don't need them\n",
+			hostIdentity.UserID, vmName)
+	}
+	return shareIdentity{qemuProcessLabel: hostIdentity.QEMUProcessLabel(), sshUserUID: guestUID}, nil
 }
 
 // announceSharedMounts prints every host directory shared into a VM, so the

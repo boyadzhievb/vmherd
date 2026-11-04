@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 10 | 7 |
+| M0 | Unblock tooling, stop data loss and host compromise | 10 | 8 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -78,11 +78,42 @@ This is a remediation plan, separate from the product roadmap milestones.
     - Document the default and the opt-out in CLAUDE.md and the README.
   - **Done when:** The decision is recorded in CLAUDE.md, the code matches it, and README documents it. A unit test shows that omitting `shared_folders` gives the default and `shared_folders: []` gives no shares.
 
-- [ ] **M0.10 — 🔬 Files the guest creates in a share must be readable on the host** · High
+- [x] **M0.10 — 🔬 Files the guest creates in a share must be readable on the host** · High
   - **Files:** `internal/vm/vm.go` (`--filesystem ... accessmode=mapped`), `internal/vm/shared.go`, cloud-init mount setup
   - **Problem:** With 9p `accessmode=mapped`, QEMU creates guest files as its own user with mode `0600` (for example `-rw------- libvirt-qemu libvirt-qemu`). The host user can't read what the VM produced. Seen on the testbed on 2026-11-04 in the M0.6 test and in `~/test-terramino` (created 2026-10-25).
   - **Fix:** Evaluate virtiofs (`--filesystem driver.type=virtiofs` plus shared memory backing), which keeps host ownership. Fall back to 9p only where virtiofs is unavailable, and document the limitation there. Check guest kernel support for every image in the registry.
   - **Done when:** On the testbed, a file written by the guest into `/vagrant` is owned by the host user and readable by them, and a host file stays editable from the guest.
+  - **Findings (testbed .49, 2026-11-04;** Debian 12, libvirt 9.0, QEMU 7.2, C `virtiofsd` from `qemu-system-common`, host user UID 1001, guest `vmherd` UID 1000**):**
+    - **Reproduced, and worse than described.** With 9p mapped, the normal guest user can't write to `/vagrant` at all (Permission denied: the share root shows host UID 1001). Only guest root can write, and its files land on the host as `libvirt-qemu 0600`. The default share is effectively unusable for the normal user.
+    - **virtiofs + matching UIDs works.** A hand-edited domain (`memoryBacking memfd/shared` and `filesystem driver=virtiofs`) mounts in the guest. A guest user whose UID matches the host user reads and writes in both directions, and files are owned by the host user (`0664`). With mismatched UIDs, the guest user is still locked out.
+    - **⚠️ libvirt-managed virtiofs is a root escalation.** libvirt runs `virtiofsd` as root. Guest root created `-rwsr-xr-x root root rootsh` (a copy of bash) in the project folder on the host. `mknod` was blocked. libvirt 9.0 can't pass `virtiofsd` options like `modcaps`, and `<idmap>` needs libvirt 10+. **Don't ship this mode.**
+    - **Guest kernels:** virtiofs is supported in ubuntu:noble (6.8), ubuntu:resolute (7.0) and debian:trixie (6.12 cloud). fedora:42, arch, rocky:9 and alma:9 weren't tested because of the unrelated bugs below.
+    - **Unrelated bugs found:** (1) fedora:42 from `ExampleHerdfile` fails checksum lookup ("no hash found for Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2"). (2) The arch `latest` checksum lookup fails, and the error ends in `: <nil>`. (3) rocky:9 and alma:9 GenericCloud images give no SSH within about 4 minutes; the cause is unknown.
+  - **Status (2026-11-04): virtiofs deferred** at the maintainer's request (no Rust `virtiofsd` on the testbed; 192.168.100.30 is a VM without nested KVM, so it can't host test VMs). Work continues with option D below.
+  - **Option D, in progress: 9p with QEMU running as the host user, plus a guest user with the host UID.**
+    - **Idea:** a per-domain `<seclabel type='static' model='dac' relabel='yes'><label>+UID:+GID</label></seclabel>` makes QEMU create share files as the host user, so guest root can't make root-owned files. Matching the guest user's UID to the host user makes host files editable from the guest. Compare `accessmode='squash'` (real modes on disk) with `mapped` (modes in xattrs, `0600` files). If it works, M0.6's ACLs on the share are no longer needed.
+    - **Cost:** a QEMU escape lands as the host user instead of `libvirt-qemu`. This is the Vagrant/VirtualBox model. Check whether AppArmor confinement still applies.
+    - **First attempt failed before reaching the share:** with label `+1001:+1001`, QEMU couldn't open `/dev/kvm` ("Could not access KVM kernel module: Permission denied"). `bojan` isn't in the `kvm` group (GID 106).
+    - **Second attempt worked (label `+1001:+106`, the host UID plus the group of `/dev/kvm`).** AppArmor still enforces (`libvirt-<uuid> (enforce)`). In both modes, the guest user (UID 1001) creates and edits files and folders, and edits host files. The host user reads and edits everything the guest created. **Guest root can't create a root-owned file on the host.**
+      - `squash`: real modes on the host (`0664`, `0775`, exec bits kept). Guest root's `chmod 4755` copy of bash is `-rwsr-xr-x 1001`, setuid as the *host user*, not root. Files created by guest root show as UID 1001 in the guest.
+      - `mapped`: every guest-created file is `-rw------- 1001:106` on the host (modes hidden in xattrs), and no setuid bit reaches the host. The guest sees accurate ownership (root files as root).
+      - **Side effects:** libvirt relabeled the VM disk to `1001:106`, and also the shared cached image in `~/.vmherd/images` (`1001:1001` → `1001:106`, not restored after `destroy`; harmless at `0644`). vmherd should read the GID from `stat /dev/kvm`, not hard-code `kvm`. M0.6's share ACLs become unnecessary.
+    - **Recommendation:** option D with `squash`, because guest files behave like normal host files (exec bits, git modes). Document the remaining risk: guest root can create a file that's setuid to the host user, which other host users with access to the project folder could run.
+  - **Resolution (2026-11-04): option D with `squash`, implemented.**
+    - `vm.Create` adds `--seclabel type=static,model=dac,label=+UID:+<gid of /dev/kvm>,relabel=yes` and `accessmode=squash` for VMs with shares.
+    - cloud-init pins the SSH user's UID to the host UID (range 1000–59999; outside it, vmherd warns and keeps the default).
+    - Guest mounts use `noatime,nofail`. vmherd refuses to run as root.
+    - M0.6's ACL code (`internal/vm/shared.go`) is removed: QEMU running as the user needs no ACLs, and `chmod` stays gone.
+    - **End-to-end on testbed .49**, one project with `web` (default share) and `plain` (`[]`): `web`'s QEMU runs as `bojan:kvm` (AppArmor enforce) with guest `vmherd` UID 1001. Guest-created files and an exec script are `1001:1001` with real modes and usable on the host. Host files are editable in the guest. Guest root's setuid copy is owned by 1001, not root. `plain` stays `libvirt-qemu` with no mount. `reload web` keeps the share and UID. The shared cached image's ownership stays stable.
+    - **Existing VMs** keep their old 9p `mapped` setup until recreated (`reload`, or `destroy` + `up`).
+    - **Test recipe (testbed .49):** create a VM with `shared_folders: []`; in the guest, `useradd -u <host uid>` a user; `virsh shutdown`; edit the `--inactive` XML (remove any `<filesystem>`, add `<filesystem type='mount' accessmode='squash|mapped'><source dir=PROJECT/><target dir='vmherd_share_0'/></filesystem>` and the DAC `<seclabel>`); `virsh define` and `start`; in the guest, `mount -t 9p -o trans=virtio,version=9p2000.L vmherd_share_0 /vagrant`. Then check: the guest user creates and edits files, the host user reads and edits guest files, and whether guest root `cp /bin/bash rootsh; chmod 4755` produces a setuid-root file on the host.
+  - **Guest mount options to adopt for any backend:** `noatime,nofail`. Today's fstab entry has no `nofail`, so a missing share can drop the guest into emergency mode. Skip `_netdev`.
+  - **Options for the fix (🧭 maintainer decision):**
+    - **A.** vmherd starts the Rust `virtiofsd` itself, as the host user, and libvirt connects through `<source socket=...>` (supported in libvirt 9.0). All guest files are then owned by the host user, with no UID matching and no root files. Needs the `virtiofsd` package (Debian 13+, Ubuntu 24.04+, Fedora). vmherd manages the daemon's lifecycle on `up`/`restart`/`reload`, and falls back to 9p elsewhere. Can't be tested on Debian 12 without installing a Rust `virtiofsd`.
+    - **B.** libvirt-managed root `virtiofsd` plus UID matching. Simple, but has the root escalation above.
+    - **C.** Stay on 9p and make the guest user's UID match the host user's. That fixes guest writes, but guest-created files stay `libvirt-qemu 0600` on the host.
+    - **D.** See "Option D, in progress" above.
+    - virtiofs notes for later (upstream guidance): keep `--sandbox namespace`; don't add `--modcaps=+sys_admin` (needed only for SELinux `trusted.` xattr remapping); `--translate-uid` can't be combined with `--posix-acl`; check whether Ubuntu 24.04's virtiofsd 1.10.0 has `--translate-uid`; libvirt `<idmap>` needs libvirt 10.0+.
 
 - [ ] **M0.8 — Make libvirt domain and disk names project-unique, and validate the project name** · High
   - **Files:** `internal/config/project.go:103-110`, all callers of `DomainName`/`DiskPath`

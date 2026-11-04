@@ -159,6 +159,10 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 
 	sharedMounts := buildSharedMounts(vmConfig)
 	announceSharedMounts(vmConfig.Name, sharedMounts)
+	shareIdentity, err := resolveShareIdentity(vmConfig.Name, sharedMounts)
+	if err != nil {
+		return err
+	}
 
 	macAddress, err := vm.GenerateMACAddress()
 	if err != nil {
@@ -168,7 +172,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
 		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
-		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts),
+		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
 	)
 	if err != nil {
 		return err
@@ -194,6 +198,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		ImagePath:          imagePath,
 		DiskSize:           vmConfig.Disk,
 		SharedFolders:      sharedMounts,
+		QEMUProcessLabel:   shareIdentity.qemuProcessLabel,
 		ConsoleLogPath:     consoleLogPath,
 	}); err != nil {
 		return err

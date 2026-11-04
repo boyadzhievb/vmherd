@@ -19,7 +19,7 @@ func TestGenerateFilesCreatesAllFiles(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "testuser", "", "ssh-ed25519 AAAA testkey", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "testuser", "", "ssh-ed25519 AAAA testkey", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestGenerateFilesUserDataContent(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA mykey", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA mykey", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestGenerateFilesNetworkConfigContent(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestGenerateFilesCustomGateway(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestGenerateFilesMetaDataContent(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestGenerateFilesWithShellProvisioning(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestGenerateFilesWithFileProvisioning(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestGenerateFilesWithMissingSourceFile(t *testing.T) {
 		},
 	}
 
-	_, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	_, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err == nil {
 		t.Fatal("expected error for missing source file")
 	}
@@ -277,7 +277,7 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 		{MountTag: "vmherd_share_0", GuestPath: "/vagrant"},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts, 1001)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -291,9 +291,10 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 	expectedFragments := []string{
 		"runcmd:",
 		"mkdir -p /vagrant",
-		"mount -t 9p",
-		"vmherd_share_0",
+		"mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 /vagrant",
 		"mounts:",
+		`  - [vmherd_share_0, /vagrant, 9p, "trans=virtio,version=9p2000.L,noatime,nofail", "0", "0"]`,
+		"  - name: vmherd\n    uid: 1001\n",
 	}
 
 	for _, fragment := range expectedFragments {
@@ -328,7 +329,7 @@ func TestGenerateFilesWithCombinedProvisioning(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -373,7 +374,7 @@ func TestGenerateFilesWithMultipleSharedMounts(t *testing.T) {
 		{MountTag: "vmherd_share_1", GuestPath: "/data"},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -439,7 +440,7 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 		{MountTag: "vmherd_share_0", GuestPath: "/vagrant"},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", sharedMounts, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,7 +495,7 @@ func TestMultiLineInlineCommandWrappedInBash(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -538,7 +539,7 @@ func TestSingleLineCommandWrappedInBash(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -584,7 +585,7 @@ func TestYAMLSpecialCharactersInCommand(t *testing.T) {
 				},
 			}
 
-			files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+			files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -620,7 +621,7 @@ func TestCloudInitFilePermissions(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -654,7 +655,7 @@ func TestGenerateFilesPathsAreCorrect(t *testing.T) {
 		},
 	}
 
-	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil)
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -668,5 +669,23 @@ func TestGenerateFilesPathsAreCorrect(t *testing.T) {
 	}
 	if files.NetworkConfig != filepath.Join(expectedDir, "network-config") {
 		t.Errorf("unexpected network-config path: %s", files.NetworkConfig)
+	}
+}
+
+// TestGenerateFilesWithoutUIDLeavesDefault verifies that sshUserUID 0 writes no uid line,
+// so the guest allocates the SSH user's UID itself.
+func TestGenerateFilesWithoutUIDLeavesDefault(t *testing.T) {
+	vmConfig := config.VM{Name: "web", Image: "ubuntu:noble", CPUs: 1, Memory: 1024, Disk: "10G",
+		Network: config.VMNetworkConfig{IP: "192.168.122.10"}}
+	files, err := GenerateFiles(t.TempDir(), vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.122", "8.8.8.8", "52:54:00:aa:bb:cc", nil, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	if strings.Contains(string(userData), "uid:") {
+		t.Errorf("expected no uid line when sshUserUID is 0, got:\n%s", userData)
 	}
 }

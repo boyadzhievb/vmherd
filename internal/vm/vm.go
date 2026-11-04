@@ -31,6 +31,11 @@ func GenerateMACAddress() (string, error) {
 	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", randomBytes[0], randomBytes[1], randomBytes[2]), nil
 }
 
+// sharedFolderAccessMode is the 9p access mode for shared folders. With QEMU
+// running as the host user, "squash" keeps real file modes on the host and
+// ignores guest chown requests QEMU is not allowed to perform.
+const sharedFolderAccessMode = "squash"
+
 // SharedFolderMount describes a host directory shared with the guest via 9p virtio.
 type SharedFolderMount struct {
 	HostPath  string // absolute path on the host
@@ -54,11 +59,15 @@ type CreateOptions struct {
 	ImagePath          string              // path to the backing cloud image
 	DiskSize           string              // disk size with unit (e.g. 20G)
 	SharedFolders      []SharedFolderMount // 9p host-to-guest directory mounts
+	QEMUProcessLabel   string              // DAC label "+UID:+GID" QEMU runs as; required when SharedFolders is set
 	ConsoleLogPath     string              // if set, serial console output is logged to this file
 }
 
 // Create provisions a new VM: creates the backing disk and runs virt-install.
 func Create(opts CreateOptions) error {
+	if len(opts.SharedFolders) > 0 && opts.QEMUProcessLabel == "" {
+		return fmt.Errorf("creating VM %s: shared folders need QEMUProcessLabel so QEMU runs as the host user, not as root or libvirt-qemu", opts.VMName)
+	}
 	if err := checkDiskPathAvailable(opts.DiskPath, opts.VMName); err != nil {
 		return err
 	}
@@ -88,14 +97,7 @@ func Create(opts CreateOptions) error {
 		args = append(args, "--serial", fmt.Sprintf("file,path=%s", opts.ConsoleLogPath))
 	}
 
-	for _, sf := range opts.SharedFolders {
-		if err := ensureSharedFolderAccess(sf.HostPath); err != nil {
-			return err
-		}
-		args = append(args,
-			"--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=mapped", sf.HostPath, sf.MountTag),
-		)
-	}
+	args = append(args, sharedFolderArgs(opts.SharedFolders, opts.QEMUProcessLabel)...)
 
 	cmd := exec.Command("sudo", args...)
 	cmd.Stdout = ui.Stdout()
@@ -109,6 +111,21 @@ func Create(opts CreateOptions) error {
 	}
 
 	return nil
+}
+
+// sharedFolderArgs returns the virt-install arguments for 9p shared folders and,
+// when there are any, the DAC seclabel that runs QEMU as the host user so files
+// it creates are owned by that user and never by root.
+func sharedFolderArgs(sharedFolders []SharedFolderMount, qemuProcessLabel string) []string {
+	if len(sharedFolders) == 0 {
+		return nil
+	}
+	args := []string{"--seclabel", fmt.Sprintf("type=static,model=dac,label=%s,relabel=yes", qemuProcessLabel)}
+	for _, sharedFolder := range sharedFolders {
+		args = append(args, "--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=%s",
+			sharedFolder.HostPath, sharedFolder.MountTag, sharedFolderAccessMode))
+	}
+	return args
 }
 
 // Start boots a stopped VM.
