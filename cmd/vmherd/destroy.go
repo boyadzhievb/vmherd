@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/network"
@@ -43,16 +42,17 @@ func newDestroyCmd() *cobra.Command {
 				if err := vm.Destroy(domainName); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
-				vmStateDir := filepath.Join(project.StateDir, vmConfig.Name)
-				_ = os.RemoveAll(vmStateDir)
+				if err := config.RemoveVMStateDir(project.StateDir, vmConfig.Name); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				}
 			}
 
 			if destroyAll {
 				if err := network.Destroy(project.Herdfile.Network.Name); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
-				if err := os.RemoveAll(project.StateDir); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: cannot remove %s: %v\n", project.StateDir, err)
+				if err := config.RemoveProjectStateDir(project.StateDir, project.Herdfile.VMNames()); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
 			}
 

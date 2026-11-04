@@ -30,7 +30,7 @@ func LoadProject() (*Project, error) {
 		return nil, err
 	}
 
-	stateDir, err := resolveStateDir(dir)
+	stateDir, err := resolveStateDir(dir, herdfile.VMNames())
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve state directory: %w", err)
 	}
@@ -43,13 +43,14 @@ func LoadProject() (*Project, error) {
 	}, nil
 }
 
-// resolveStateDir determines the persistent state directory for a project.
-// Priority: VMHERD_STATE_DIR env var > global ~/.local/state/vmherd/<hash>.
-// Falls back to the legacy .vmherd/ in-project directory if it already exists.
-func resolveStateDir(projectDir string) (string, error) {
+// resolveStateDir determines the persistent state directory for a project
+// and makes sure it carries the vmherd marker file.
+// Priority: VMHERD_STATE_DIR env var > legacy in-project .vmherd/ > global
+// ~/.local/state/vmherd/<hash>. vmNames are the Herdfile VMs, used to vet VMHERD_STATE_DIR.
+func resolveStateDir(projectDir string, vmNames []string) (string, error) {
 	if envDir := os.Getenv("VMHERD_STATE_DIR"); envDir != "" {
-		if err := os.MkdirAll(envDir, 0o700); err != nil {
-			return "", fmt.Errorf("cannot create VMHERD_STATE_DIR %s: %w", envDir, err)
+		if err := adoptUserStateDir(envDir, vmNames); err != nil {
+			return "", err
 		}
 		return envDir, nil
 	}
@@ -58,19 +59,19 @@ func resolveStateDir(projectDir string) (string, error) {
 	// it for backwards compatibility — don't move state out from under the user.
 	localDotDir := filepath.Join(projectDir, ".vmherd")
 	if info, err := os.Lstat(localDotDir); err == nil && info.IsDir() {
-		return localDotDir, nil
+		return localDotDir, ensureStateDirMarker(localDotDir)
 	}
 
 	globalDir, err := globalStateDir(projectDir)
 	if err != nil {
-		return localDotDir, nil
+		return localDotDir, ensureStateDirMarker(localDotDir)
 	}
 
-	if err := os.MkdirAll(globalDir, 0o700); err != nil {
-		return localDotDir, nil
+	if err := os.MkdirAll(globalDir, stateDirPermissions); err != nil {
+		return localDotDir, ensureStateDirMarker(localDotDir)
 	}
 
-	return globalDir, nil
+	return globalDir, ensureStateDirMarker(globalDir)
 }
 
 // globalStateDir returns $XDG_STATE_HOME/vmherd/<name>-<hash> where the hash

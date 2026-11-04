@@ -71,3 +71,12 @@ type Provision struct {
 	Source      string        `yaml:"source"`      // local file path (file type)
 	Destination string        `yaml:"destination"` // guest file path (file type)
 }
+
+// VMNames returns the names of all VMs in the Herdfile, in declaration order.
+func (herdfile *Herdfile) VMNames() []string {
+	vmNames := make([]string, 0, len(herdfile.VMs))
+	for _, vmDefinition := range herdfile.VMs {
+		vmNames = append(vmNames, vmDefinition.Name)
+	}
+	return vmNames
+}

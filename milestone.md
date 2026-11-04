@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 3 |
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 4 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -51,7 +51,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 0C — Host data loss and privilege
 
-- [ ] **M0.4 — `destroy` must never `RemoveAll` an arbitrary directory** · Crit
+- [x] **M0.4 — `destroy` must never `RemoveAll` an arbitrary directory** · Crit
   - **Files:** `cmd/vmherd/destroy.go:47,54`, `internal/config/project.go` (`resolveStateDir`)
   - **Problem:** `os.RemoveAll(project.StateDir)` is called on the raw `VMHERD_STATE_DIR` value. With `VMHERD_STATE_DIR=$HOME`, `vmherd destroy` deletes the home directory. The per-VM `RemoveAll` error is also discarded with `_ =`.
   - **Fix:** Write a marker file (for example `.vmherd-state`) when creating a state directory. Refuse to delete a directory without the marker, and delete only the files and subdirectories vmherd creates (`id_ed25519*`, `<vm>/`, `network/`, `state.json`). Return or log every error.
