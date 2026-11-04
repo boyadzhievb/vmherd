@@ -91,7 +91,9 @@ func applyDefaults(herdfile *Herdfile, dir string) {
 		if herdfile.VMs[i].Disk == "" {
 			herdfile.VMs[i].Disk = "20G"
 		}
-		if len(herdfile.VMs[i].SharedFolders) == 0 {
+		// Omitted (nil) gets the project share; an explicit 'shared_folders: []'
+		// is non-nil and means "no shares".
+		if herdfile.VMs[i].SharedFolders == nil {
 			herdfile.VMs[i].SharedFolders = []SharedFolder{
 				{Host: defaultSharedFolderHost, Guest: defaultSharedFolderGuest},
 			}

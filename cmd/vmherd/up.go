@@ -229,6 +229,7 @@ func createSingleVM(
 		vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
 	sharedMounts := buildSharedMounts(vmConfig)
+	announceSharedMounts(vmConfig.Name, sharedMounts)
 
 	macAddress, err := vm.GenerateMACAddress()
 	if err != nil {
@@ -330,6 +331,20 @@ func buildSharedMounts(vmConfig config.VM) []vm.SharedFolderMount {
 		})
 	}
 	return mounts
+}
+
+// announceSharedMounts prints every host directory shared into a VM, so the
+// default project share and any extra shares are never a surprise. One
+// Printf call keeps the lines together when VMs are created in parallel.
+func announceSharedMounts(vmName string, sharedMounts []vm.SharedFolderMount) {
+	if len(sharedMounts) == 0 {
+		return
+	}
+	var announcement strings.Builder
+	for _, sharedMount := range sharedMounts {
+		fmt.Fprintf(&announcement, "  %s: sharing %s → %s (read-write)\n", vmName, sharedMount.HostPath, sharedMount.GuestPath)
+	}
+	ui.Printf("%s", announcement.String())
 }
 
 // buildCloudInitMounts converts vm.SharedFolderMount into cloudinit.SharedMount

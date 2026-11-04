@@ -158,6 +158,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
 
 	sharedMounts := buildSharedMounts(vmConfig)
+	announceSharedMounts(vmConfig.Name, sharedMounts)
 
 	macAddress, err := vm.GenerateMACAddress()
 	if err != nil {

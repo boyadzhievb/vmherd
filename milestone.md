@@ -8,7 +8,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 - Work **one item at a time**, in order. Each item becomes one commit (or one PR).
 - Before committing: `gofmt -l .` is empty, `go vet ./...`, `go test ./...` and `golangci-lint run` all pass.
 - Tick the checkbox `[x]` in the same commit that fixes the item.
-- 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.43 before fixing. If it doesn't reproduce, close the item with a note.
+- 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.49 before fixing. If it doesn't reproduce, close the item with a note.
 - 🧭 **Decision** = needs a product decision from the maintainer before any code changes.
 - Severity: **Crit** / **High** / **Med** / **Low**.
 
@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 6 |
+| M0 | Unblock tooling, stop data loss and host compromise | 10 | 7 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -69,11 +69,20 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** If `setfacl` fails, return an actionable error ("install the `acl` package or run `setfacl -m u:<qemu>:rwx <path>`"). Never widen permissions to "other". Also check that QEMU can traverse the parent directories (home directories are often `0750`).
   - **Done when:** No `chmod` call remains in `shared.go`, and the error message names the exact command to run.
 
-- [ ] **M0.7 — 🧭 Decide on the implicit `.` → `/vagrant` share** · High
+- [x] **M0.7 — 🧭 Decide on the implicit `.` → `/vagrant` share** · High
   - **Files:** `internal/config/parse.go:97-101`, README, `ExampleHerdfile`
   - **Problem:** Every VM silently mounts the project directory with write access for QEMU, even if the user never asked for it.
-  - **Decision:** Keep it as the default (Vagrant compatibility, documented clearly), or make it opt-in (`shared_folders: default`).
-  - **Done when:** The decision is recorded in CLAUDE.md, the code matches it, and README documents it.
+  - **Decision (2026-11-04):** Keep it as the default. vmherd's audience is people moving off Vagrant, whose scripts expect `/vagrant`, and "your code is already in the VM" is the core experience. Remove the surprises instead:
+    - `vmherd up` prints every share (`<vm>: sharing <host> → <guest> (read-write)`).
+    - `shared_folders: []` means "no shares". Today an empty list is replaced by the default too.
+    - Document the default and the opt-out in CLAUDE.md and the README.
+  - **Done when:** The decision is recorded in CLAUDE.md, the code matches it, and README documents it. A unit test shows that omitting `shared_folders` gives the default and `shared_folders: []` gives no shares.
+
+- [ ] **M0.10 — 🔬 Files the guest creates in a share must be readable on the host** · High
+  - **Files:** `internal/vm/vm.go` (`--filesystem ... accessmode=mapped`), `internal/vm/shared.go`, cloud-init mount setup
+  - **Problem:** With 9p `accessmode=mapped`, QEMU creates guest files as its own user with mode `0600` (for example `-rw------- libvirt-qemu libvirt-qemu`). The host user can't read what the VM produced. Seen on the testbed on 2026-11-04 in the M0.6 test and in `~/test-terramino` (created 2026-10-25).
+  - **Fix:** Evaluate virtiofs (`--filesystem driver.type=virtiofs` plus shared memory backing), which keeps host ownership. Fall back to 9p only where virtiofs is unavailable, and document the limitation there. Check guest kernel support for every image in the registry.
+  - **Done when:** On the testbed, a file written by the guest into `/vagrant` is owned by the host user and readable by them, and a host file stays editable from the guest.
 
 - [ ] **M0.8 — Make libvirt domain and disk names project-unique, and validate the project name** · High
   - **Files:** `internal/config/project.go:103-110`, all callers of `DomainName`/`DiskPath`

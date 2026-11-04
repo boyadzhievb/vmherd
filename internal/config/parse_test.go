@@ -205,6 +205,29 @@ vms:
 	}
 }
 
+func TestEmptySharedFoldersMeansNoShares(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      ip: 192.168.122.5
+    shared_folders: []
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hf.VMs[0].SharedFolders) != 0 {
+		t.Errorf("expected no shared folders for 'shared_folders: []', got %+v", hf.VMs[0].SharedFolders)
+	}
+}
+
 func TestExplicitSharedFolders(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `

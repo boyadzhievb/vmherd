@@ -81,6 +81,18 @@ ssh:
 
 ---
 
+### Shared Folders (default project share)
+
+Decision (2026-11-04, remediation item M0.7): every VM shares the project directory at `/vagrant` **by default**. vmherd's users are moving off Vagrant, their scripts expect `/vagrant`, and having your code already in the VM is the core experience. The default must never be a surprise:
+
+- `shared_folders` omitted → the default `.` → `/vagrant` share.
+- `shared_folders: []` → no shares at all.
+- An explicit list replaces the default; add `{host: ., guest: /vagrant}` yourself to keep it.
+- `vmherd up` prints every share it creates (`<vm>: sharing <host> → <guest> (read-write)`).
+- Host paths must resolve inside the project or `$HOME` (`allow_outside_home: true` per entry for others). `/`, `$HOME` itself and system directories are always refused.
+
+---
+
 ## Image Registry (Built-In)
 
 vmherd ships with a built-in registry of official cloud image URLs. No external service needed.
