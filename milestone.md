@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 9 | 5 |
+| M0 | Unblock tooling, stop data loss and host compromise | 9 | 6 |
 | M1 | Correctness of existing features | 11 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -63,7 +63,7 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** Run `filepath.EvalSymlinks` on the resolved path. Reject `/`, `$HOME` exactly, and the system prefixes. Prefer allowing only paths under the project directory or under `$HOME`, with an explicit opt-out flag for other paths.
   - **Done when:** Table-driven tests reject `/`, `~`, `/var/x`, and a symlink to `/etc`, and accept `.` and `./src`.
 
-- [ ] **M0.6 — Remove the `chmod o+rwx` fallback** · Crit
+- [x] **M0.6 — Remove the `chmod o+rwx` fallback** · Crit
   - **Files:** `internal/vm/shared.go:25-33`
   - **Problem:** When `setfacl` fails, vmherd runs `sudo chmod o+rwx` on the host path. That makes the project directory (or worse, see M0.5) world-writable without the user noticing.
   - **Fix:** If `setfacl` fails, return an actionable error ("install the `acl` package or run `setfacl -m u:<qemu>:rwx <path>`"). Never widen permissions to "other". Also check that QEMU can traverse the parent directories (home directories are often `0750`).
