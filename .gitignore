@@ -1,2 +1,4 @@
 /vmherd
 .vmherd/
+/vmherd-*
+/dist/

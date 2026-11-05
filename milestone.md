@@ -16,7 +16,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 10 | 9 |
+| M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
 | M1 | Correctness of existing features | 15 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
@@ -123,11 +123,12 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Result (2026-11-05):** Names are `vmherd-<project>-<hash8>-<vm>` (hash = state-dir hash; user chose the hash before the VM name). No `state.json` yet, so migration proves ownership by MAC: the old-style domain is used only if its MAC matches `<state>/<vm>/network-config`; another project's old domain is left alone with a note. `vmherd reload` moves a VM to the new name. Safe names alone weren't enough: the state dir, share host path and console-log path also reach `virt-install` and split at commas. All virt-install paths are now double-quoted (virt-install 4.1.0 does not accept `,,`); paths with `"` or line breaks are refused before any disk is created, because virt-install double-escapes `"` in the XML. Verified on .49: old-binary VM found by `status`/`ssh`/`destroy`; same-basename project gets its own domain and its `destroy` leaves the other VM running; `reload` migrates; `We b,x` project boots with `/vagrant` share and console log; `q"x` is refused with no leftovers.
   - **Found, not fixed (pre-existing):** `vmherd console-log` fails with "permission denied" because virtlogd writes `console.log` as `root:root 0600` (same with the old binary). The default network name `vmherd-<basename>` still collides between same-basename projects.
 
-- [ ] **M0.9 — Remove the committed binary** · Low
+- [x] **M0.9 — Remove the committed binary** · Low
   - **Files:** `vmherd-linux-amd64`, `.gitignore`
   - **Problem:** A 10 MB binary was committed in `6280642 fixes`, and `.gitignore` covers only `/vmherd`.
   - **Fix:** Run `git rm --cached vmherd-linux-amd64` and add `/vmherd-*` and `/dist/` to `.gitignore`. 🧭 Rewriting history to purge the blob is the maintainer's call.
   - **Done when:** `git ls-files | grep vmherd-linux` is empty.
+  - **Result (2026-11-05):** Untracked with `git rm --cached` (the local file stays) and `/vmherd-*`, `/dist/` added to `.gitignore`. The release workflow only builds into `dist/` and uploads it, so it is unaffected. History was not rewritten; the ~10 MB blob stays in old commits.
 
 ---
 
