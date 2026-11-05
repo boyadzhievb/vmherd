@@ -966,3 +966,35 @@ network:
 		t.Fatalf("IP outside DHCP pool should be accepted, got: %v", err)
 	}
 }
+
+func TestGatewayWithoutIPIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    network:
+      gateway: 192.168.122.1
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "DHCP") {
+		t.Errorf("expected an error explaining that DHCP provides the gateway, got %v", err)
+	}
+}
+
+func TestVMWithoutIPIsValid(t *testing.T) {
+	dir := t.TempDir()
+	herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+`
+	if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err != nil {
+		t.Errorf("a VM without network.ip (DHCP) must be valid, got %v", err)
+	}
+}

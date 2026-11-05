@@ -228,9 +228,14 @@ func validateDiskSize(diskSize string, vmName string) error {
 	return nil
 }
 
-// validateVMIPAddress validates a VM's IP: correct format, no duplicates, within subnet.
+// validateVMIPAddress validates a VM's IP: correct format, no duplicates,
+// within subnet. No ip means DHCP, which must not have a gateway override.
 func validateVMIPAddress(vmConfig VM, subnet string, usedIPs map[string]string) error {
 	if vmConfig.Network.IP == "" {
+		if vmConfig.Network.Gateway != "" {
+			return fmt.Errorf("VM %q: network.gateway is set but network.ip is not — without an ip the VM uses DHCP, which provides the gateway; add an ip or remove the gateway",
+				vmConfig.Name)
+		}
 		return nil
 	}
 

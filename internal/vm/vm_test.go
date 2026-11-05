@@ -151,3 +151,19 @@ func TestBuildVirtInstallArgsRefusesQuotedStateDir(t *testing.T) {
 		t.Error("expected an error for a state dir containing a double quote")
 	}
 }
+
+func TestParseLeaseIPv4(t *testing.T) {
+	domifaddrOutput := ` Name       MAC address          Protocol     Address
+-------------------------------------------------------------------------------
+ vnet7      52:54:00:ab:cd:01    ipv6         fd00::5/64
+ vnet7      52:54:00:ab:cd:01    ipv4         192.168.150.123/24
+
+`
+	if got := parseLeaseIPv4(domifaddrOutput); got != "192.168.150.123" {
+		t.Errorf("parseLeaseIPv4() = %q, want 192.168.150.123", got)
+	}
+	noLease := " Name       MAC address          Protocol     Address\n-------------------------------------------------------\n\n"
+	if got := parseLeaseIPv4(noLease); got != "" {
+		t.Errorf("parseLeaseIPv4() without a lease = %q, want empty", got)
+	}
+}

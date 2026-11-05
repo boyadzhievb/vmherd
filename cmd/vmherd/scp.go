@@ -32,15 +32,6 @@ Examples:
 				vmByName[vm.Name] = vm
 			}
 
-			scpArgs := make([]string, 2)
-			for i, arg := range args {
-				resolved, err := resolveScpPath(arg, vmByName, project.Herdfile.SSH.User)
-				if err != nil {
-					return err
-				}
-				scpArgs[i] = resolved
-			}
-
 			for _, vmConfig := range project.Herdfile.VMs {
 				for _, arg := range args {
 					colonIdx := strings.Index(arg, ":")
@@ -53,13 +44,23 @@ Examples:
 				}
 			}
 
+			scpArgs := make([]string, 2)
+			for i, arg := range args {
+				resolved, err := resolveScpPath(arg, vmByName, project)
+				if err != nil {
+					return err
+				}
+				scpArgs[i] = resolved
+			}
+
 			return ssh.CopyFiles(project.SSHKeyPath(), project.Herdfile.SSH.User, scpArgs)
 		},
 	}
 }
 
-// resolveScpPath converts "vmname:/path" to "user@ip:/path".
-func resolveScpPath(path string, vmByName map[string]config.VM, sshUser string) (string, error) {
+// resolveScpPath converts "vmname:/path" to "user@address:/path", using the
+// VM's static ip or current DHCP lease.
+func resolveScpPath(path string, vmByName map[string]config.VM, project *config.Project) (string, error) {
 	colonIdx := strings.Index(path, ":")
 	if colonIdx < 0 {
 		return path, nil
@@ -80,9 +81,10 @@ func resolveScpPath(path string, vmByName map[string]config.VM, sshUser string) 
 		return "", fmt.Errorf("unknown VM %q — available: %s", prefix, strings.Join(available, ", "))
 	}
 
-	if vmConfig.Network.IP == "" {
-		return "", fmt.Errorf("VM %q has no IP address configured", prefix)
+	vmConfig, err := withCurrentAddress(project, vmConfig)
+	if err != nil {
+		return "", err
 	}
 
-	return fmt.Sprintf("%s@%s%s", sshUser, vmConfig.Network.IP, suffix), nil
+	return fmt.Sprintf("%s@%s%s", project.Herdfile.SSH.User, vmConfig.Network.IP, suffix), nil
 }

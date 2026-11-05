@@ -65,8 +65,9 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 		return nil
 	}
 
-	if vmConfig.Network.IP == "" {
-		return fmt.Errorf("VM %q has no IP address — cannot provision without network access", vmConfig.Name)
+	vmConfig, err := withCurrentAddress(project, vmConfig)
+	if err != nil {
+		return err
 	}
 
 	totalSteps := len(vmConfig.Provision)

@@ -170,23 +170,35 @@ func writeSharedMountEntries(builder *strings.Builder, sharedMounts []SharedMoun
 	}
 }
 
-// writeNetworkConfig generates the cloud-init network-config file for static IP assignment.
+// writeNetworkConfig generates the cloud-init network-config file. With an
+// ipAddress the interface gets that static address; without one it uses
+// DHCP keyed by MAC (the lease 'virsh domifaddr' looks up). Either way DNS is
+// dnsServer (derived from the host), never the DHCP-provided server.
 func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer, macAddress string) error {
-	content := fmt.Sprintf(`version: 2
-ethernets:
-  primary:
-    match:
-      macaddress: "%s"
-    dhcp4: false
+	addressing := fmt.Sprintf(`    dhcp4: false
     addresses:
       - %s/24
     routes:
       - to: default
         via: %s
-    nameservers:
+`, ipAddress, gateway)
+	if ipAddress == "" {
+		addressing = `    dhcp4: true
+    dhcp-identifier: mac
+    dhcp4-overrides:
+      use-dns: false
+`
+	}
+
+	content := fmt.Sprintf(`version: 2
+ethernets:
+  primary:
+    match:
+      macaddress: "%s"
+%s    nameservers:
       addresses:
         - %s
-`, macAddress, ipAddress, gateway, dnsServer)
+`, macAddress, addressing, dnsServer)
 
 	return os.WriteFile(filepath.Join(seedDir, "network-config"), []byte(content), 0o600)
 }

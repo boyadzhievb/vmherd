@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestGenerateFilesCreatesAllFiles(t *testing.T) {
@@ -731,5 +732,40 @@ func TestReadSavedMACAddressCorrupt(t *testing.T) {
 
 	if _, err := ReadSavedMACAddress(stateDir, "ctrl"); err == nil {
 		t.Error("expected an error for corrupt network-config")
+	}
+}
+
+func TestGenerateFilesNetworkConfigDHCP(t *testing.T) {
+	stateDir := t.TempDir()
+	vmConfig := config.VM{Name: "dhcpvm", Image: "ubuntu:noble"}
+
+	files, err := GenerateFiles(stateDir, vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.150", "192.168.150.1", "52:54:00:aa:bb:cc", nil, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	data, err := os.ReadFile(files.NetworkConfig)
+	if err != nil {
+		t.Fatalf("cannot read network-config: %v", err)
+	}
+	content := string(data)
+
+	for _, fragment := range []string{"dhcp4: true", "dhcp-identifier: mac", "use-dns: false", `macaddress: "52:54:00:aa:bb:cc"`, "- 192.168.150.1"} {
+		if !strings.Contains(content, fragment) {
+			t.Errorf("DHCP network-config missing %q:\n%s", fragment, content)
+		}
+	}
+	for _, forbidden := range []string{"/24", "routes:", "dhcp4: false"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("DHCP network-config must not contain %q:\n%s", forbidden, content)
+		}
+	}
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Errorf("DHCP network-config is not valid YAML: %v", err)
+	}
+	macAddress, err := ReadSavedMACAddress(stateDir, "dhcpvm")
+	if err != nil || macAddress != "52:54:00:aa:bb:cc" {
+		t.Errorf("ReadSavedMACAddress = %q, %v; want the MAC from the DHCP config", macAddress, err)
 	}
 }

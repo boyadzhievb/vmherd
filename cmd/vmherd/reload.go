@@ -88,6 +88,7 @@ Examples:
 				}
 			}
 
+			vmsToReload = waitForAddresses(project, vmsToReload)
 			ui.Println("\nWaiting for SSH on reloaded VMs...")
 			for _, vmConfig := range vmsToReload {
 				if vmConfig.Network.IP == "" {

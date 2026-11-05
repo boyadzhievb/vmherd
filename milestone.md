@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 16 | 3 |
+| M1 | Correctness of existing features | 17 | 4 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -167,11 +167,15 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Verified on .49:** default: `localhost:18080` works, host LAN IP and the Mac are refused, listener only on 127.0.0.1; `host_ip: 0.0.0.0` reachable from the Mac; host port 80 runs as `sudo -n ssh` and works; second `up` keeps the tunnel; a killed tunnel is restarted by `up`; `down` stops it; a busy port is reported and the old tunnel keeps serving; after `destroy` no tunnel runs and `iptables-save` is identical to before (only libvirt's own rules appear while the network exists). Not run end to end: `init`'s full example (4 GB + 2 GB VMs don't fit next to the testbed's other VMs).
   - **Known limits:** TCP only. A tunnel drops when the VM reboots or the host restarts, until the next `vmherd up`. Old iptables rules from earlier vmherd versions are not removed automatically (they never worked and vanish on host reboot).
 
-- [ ] **M1.4 — A VM without `network.ip` gets invalid cloud-init** · High
+- [x] **M1.4 — A VM without `network.ip` gets invalid cloud-init** · High
   - **Files:** `internal/cloudinit/cloudinit.go:162-180`, `internal/config/parse.go`, `cmd/vmherd/up.go`
   - **Problem:** With an empty IP, network-config contains `addresses: - /24`. The VM boots with no network, and `up` still reports success (it just skips SSH).
   - **Fix:** Either make `ip` required at validation, or auto-assign a free address outside the DHCP pool and persist it (needs M2.1).
   - **Done when:** A Herdfile without `ip` either fails validation with an actionable error, or produces a reachable VM.
+  - **Decision (user):** DHCP, like vagrant-libvirt, instead of making `ip` required.
+  - **Result (2026-11-05):** Without `ip`, network-config uses `dhcp4: true` (match by MAC) with `dhcp4-overrides: use-dns: false`, so DNS stays host-derived. vmherd reads the address from libvirt's lease table (`virsh domifaddr --source lease`): `up`, `restart` and `reload` wait for the lease (backoff, 120s) before SSH and port forwards; `ssh`, `scp` and `provision` look up the current lease and explain when there is none yet (`scp` now checks "running" first); `status` shows the lease, `dhcp (no lease yet)` or `dhcp`. `network.gateway` without `ip` is refused. Verified on .49 with one DHCP and one static VM: lease .106, SSH ready, port forward, `ssh`, `scp`, `provision`, guest DNS = host-derived server; `restart` keeps the lease; `reload` gets a new MAC and lease (.142) and the tunnel follows; `status` after `down` shows `dhcp`; `destroy` leaves no VM, tunnel or network.
+  - **Found, not fixed:** two VMs created in parallel can make virt-install print `FileNotFoundError: …/virt-install.log.5` — now part of M1.17.
+  - **Review follow-up (code-reviewer agent, 2026-11-05):** leases are now awaited in parallel, each VM with its own 120s deadline, and `virsh` lookup errors are retried until then (one slow VM used to eat the shared budget of the others). DHCP uses `dhcp-identifier: mac`, so the lease is keyed by the MAC that `domifaddr` filters on, not by machine-id. Re-verified on .49 with an Ubuntu and a Debian 13 DHCP VM booting together: both got leases with client-id `01:<mac>`, and both resolve DNS through the host-derived server. Accepted as is: a lease could briefly be stale right after `restart` (same MAC, so in practice the same address); the resolved address is a copy of `config.VM` with `Network.IP` overwritten, and no copy reaches cloud-init or validation. DNS override on NetworkManager guests (Fedora/Rocky/Alma) is untested → M1.14.
 
 ### Phase 1B — Lifecycle reliability
 
@@ -192,6 +196,7 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Problem:** Failed VM creations (when at least one succeeds), destroy warnings, port-forward failures and SSH timeouts all exit 0.
   - **Fix:** Collect the errors with `errors.Join` and return them at the end so the exit code is 1, while still processing every VM.
   - **Done when:** A test (after M2.3) or a manual check shows `up` exits 1 when one of two VMs fails.
+  - **Also (from M1.4 review):** a DHCP VM that gets no lease, like a VM whose SSH wait times out, only prints a warning, is left out of the "All VMs ready" list, and `up` exits 0.
 
 - [ ] **M1.8 — Wait for cloud-init to finish and surface failures** · Med
   - **Files:** `cmd/vmherd/up.go` (`waitForSSHInParallel`), `internal/ssh`
@@ -254,6 +259,20 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Decision needed:** stop at the first failing command by default (`bash -e`, optionally `-o pipefail`), which matches what users expect from a provisioning step but can break scripts that rely on ignoring a failure; or keep plain bash semantics and document that scripts must `set -e` themselves (Vagrant's behavior).
   - **Fix:** Apply the chosen mode to both `vmherd provision` and first-boot `runcmd`, so a script behaves the same on both paths, and document it.
   - **Done when:** A unit test shows a script with a failing first command and a succeeding last command fails the step (or, with the documented option, succeeds), and on the testbed `vmherd provision` reports the step as failed with a non-zero exit code.
+
+- [ ] **M1.17 — Create VMs without `virt-install` (domain XML + own cloud-init seed)** · Med
+  - **Files:** `internal/vm/vm.go` (`Create`, `buildVirtInstallArgs`, `sharedFolderArgs`, `quoteVirtInstallValue`), `internal/cloudinit/cloudinit.go`, `cmd/vmherd/up.go` (`createVMsInParallel`), `cmd/vmherd/destroy.go`, README/CLAUDE.md (dependencies)
+  - **Problem:** `up` runs up to four `sudo virt-install` at once, and each rotates the same `/root/.cache/virt-manager/virt-install.log`: `FileNotFoundError: [Errno 2] No such file or directory: '/root/.cache/virt-manager/virt-install.log.5'` (seen on .49, 2026-11-05, M1.4 test; both VMs were still created). More generally, virt-install is an extra host dependency whose option syntax needed the M0.8 quoting work, and vmherd can't control the XML it produces.
+  - **How Vagrant does it:** vagrant-libvirt never runs virt-install. It renders the domain XML from a template, creates volumes through libvirt's storage API and defines/starts the domain through the API, so parallel `vagrant up` shares no log file.
+  - **Decision (2026-11-05):** do the full fix, not the per-run `XDG_CACHE_HOME` workaround. (1) Keep `sudo virsh` for define/start in this item, consistent with every other libvirt call; moving to the libvirt API is M2.7/M2.8. (2) Build the NoCloud seed (label `cidata`; files `user-data`, `meta-data`, `network-config`) as an ISO 9660 image in pure Go; if the chosen library can't write those names (needs Rock Ridge or Joliet), use a FAT image labelled `cidata` instead. No `xorriso`/`genisoimage` dependency.
+  - **Fix (revised after code review, 2026-11-05):**
+    - **Baseline first:** capture `virt-install --print-xml` (or `virsh dumpxml` of today's VMs) for Ubuntu, Debian, Fedora, Rocky/Alma and Arch and commit them as golden files; the rendered XML is diffed against them. Things virt-install adds that libvirt won't on its own and must be explicit: `<os><type machine='q35'>`, `<features><acpi/><apic/>` (graceful `down` needs ACPI), `<clock offset='utc'>`, `on_poweroff/reboot/crash`, `<cpu mode='host-passthrough'>`, virtio disk and net, virtio-rng (boot entropy for cloud-init/ssh keygen), memballoon, qemu-guest-agent channel, usb tablet, serial console. Scope: x86_64 with BIOS firmware (what virt-install picks today); aarch64/UEFI is out of scope (UEFI would also need `undefine --nvram`).
+    - **Render with `encoding/xml` structs, not `text/template`:** values (share paths, console log path, names) are escaped by the encoder, so the M0.8 injection class can't come back. The domain carries: qcow2 disk, seed disk, NAT interface with the MAC, serial console to file when `console_log` is set, 9p `<filesystem>` with `accessmode=squash` and the M0.10 DAC `<seclabel>`, CPUs/memory, VNC listen none.
+    - **Seed:** NoCloud, label `cidata`, files `user-data`, `meta-data`, `network-config`, with a unique `instance-id` per create (so `reload` reruns cloud-init). Candidate libraries: `github.com/diskfs/go-diskfs` (ISO 9660 with Rock Ridge, and FAT32 with a label; heavy dependency tree) or a small hand-written ISO 9660 + Rock Ridge `NM` writer for three files. `kdomanski/iso9660` likely lacks Rock Ridge/Joliet, so long names with `-` wouldn't survive; verify before choosing. FAT fallback must be attached as a disk (not cdrom); check the guest kernels have vfat.
+    - **Placement:** build the seed in a temp file as the user, then `sudo install -m 0640` it to `/var/lib/libvirt/images/vmherd-<project>-<hash>-<vm>-seed.iso` (never write there directly; never keep it in the state dir, which QEMU may not traverse). libvirt relabels files there (SELinux `svirt_image_t`, AppArmor, M0.10 DAC label).
+    - **Apply:** `sudo virsh define`, `autostart`, `start` behind one small function, so M2.7/M2.8 replace only that and the install step is the single place that knows about privilege. Roll back on partial failure (define failed, disk exists, seed exists): no domain or seed left behind, re-running `up` works. `destroy`, `reload` and failed creates remove the seed.
+    - Remove `quoteVirtInstallValue`, `unsafeVirtInstallPathCharacters` and the `virt-install` dependency; update the CLAUDE.md line "Shell-out is acceptable for virt-install".
+  - **Done when:** `virt-install` is not called anywhere. Unit tests: golden XML per distro (shares + seclabel, console log, static and DHCP VMs) and a round trip that reads the seed back (label `cidata`, three file names, contents). Testbed: four VMs created in one `up` show no traceback; Ubuntu, Debian, Fedora, Rocky/Alma and Arch boot and get their network (static and DHCP); `/vagrant` (M0.10) mounts; the console log is written; graceful `down` and `restart` work; `reload` reruns cloud-init; a forced partial failure leaves nothing behind; `destroy` leaves no seed file.
 
 Note: the default network name collision is handled under M1.2.
 

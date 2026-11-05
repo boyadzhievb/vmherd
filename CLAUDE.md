@@ -131,7 +131,7 @@ Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM 
 ### Provisioning via cloud-init
 
 - SSH key injection (ed25519, generated per project)
-- Static IP assignment via network-config
+- Static IP assignment via network-config, or DHCP when `network.ip` is omitted (vmherd reads the address from the libvirt lease with `virsh domifaddr --source lease`; DNS stays host-derived via `dhcp4-overrides: use-dns: false`)
 - Shell provisioning via runcmd
 - File provisioning via write_files
 - DNS from host `/etc/resolv.conf` — never hardcode external DNS (air-gap support)

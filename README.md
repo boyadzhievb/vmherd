@@ -136,8 +136,8 @@ ssh:
 | `cpus` | 1 | Number of vCPUs |
 | `memory` | 1024 | Memory in MB |
 | `disk` | 20G | Disk size |
-| `network.ip` | — | Static IP address |
-| `network.gateway` | subnet .1 | Gateway IP |
+| `network.ip` | — (DHCP) | Static IPv4 address in the subnet, outside the DHCP range .100–.200. Omit it to use DHCP: vmherd then reads the VM's address from libvirt's lease table for `ssh`, `scp`, `provision`, port forwards and `status` |
+| `network.gateway` | subnet .1 | Gateway IP (static `ip` only; with DHCP the gateway comes from DHCP) |
 | `shared_folders` | `[{host: ".", guest: "/vagrant"}]` | Host directories shared via 9p virtio. Files keep the same owner and modes on host and guest: QEMU runs as you for VMs with shares, and the guest SSH user gets your UID. Omit it to get the project at `/vagrant`; set `shared_folders: []` for no shares; an explicit list replaces the default. `vmherd up` prints every share. `host` must resolve (symlinks included) inside the project directory or `$HOME`; set `allow_outside_home: true` on an entry to share another path. `/`, `$HOME` itself and system directories are always refused |
 | `ports` | — | Port forwards (`host`→`guest`), carried by one background `ssh -L` tunnel per VM (TCP only; no firewall rules). `host_ip` defaults to `127.0.0.1` (this machine only); set `0.0.0.0` or a host address to expose a port on the network. Host ports below 1024 run the tunnel via `sudo`. `up`, `restart` and `reload` start the tunnel once SSH is ready; `down` and `destroy` stop it |
 | `provision` | — | List of provisioning steps |

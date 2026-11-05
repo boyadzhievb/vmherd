@@ -76,6 +76,7 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
+			activeVMs = waitForAddresses(project, activeVMs)
 			waitForSSHInParallel(activeVMs, keyPath, project.Herdfile.SSH.User)
 			startPortForwardingForVMs(project, activeVMs)
 

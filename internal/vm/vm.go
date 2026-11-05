@@ -37,6 +37,15 @@ func GenerateMACAddress() (string, error) {
 // ignores guest chown requests QEMU is not allowed to perform.
 const sharedFolderAccessMode = "squash"
 
+const (
+	// domifaddrProtocolColumn is the Protocol column in 'virsh domifaddr' output.
+	domifaddrProtocolColumn = 2
+	// domifaddrAddressColumn is the Address column (CIDR) in 'virsh domifaddr' output.
+	domifaddrAddressColumn = 3
+	// domifaddrMinimumFields is how many columns an address row has.
+	domifaddrMinimumFields = 4
+)
+
 // unsafeVirtInstallPathCharacters can't be passed inside a quoted virt-install
 // value: virt-install double-escapes '"' in the domain XML, and line breaks
 // would end the argument.
@@ -239,6 +248,32 @@ func parseDomainInterfaceMACs(domiflistOutput string) []string {
 		}
 	}
 	return macAddresses
+}
+
+// LeaseAddress returns the IPv4 address libvirt's DHCP server leased to the
+// domain, or "" when it has no lease yet (still booting, or not running).
+func LeaseAddress(domainName string) (string, error) {
+	output, err := exec.Command("sudo", "virsh", "domifaddr", domainName, "--source", "lease").Output()
+	if err != nil {
+		return "", fmt.Errorf("reading DHCP lease of %s: %w — check that libvirtd is running and the VM exists", domainName, err)
+	}
+	return parseLeaseIPv4(string(output)), nil
+}
+
+// parseLeaseIPv4 returns the first ipv4 address (without prefix length) in
+// 'virsh domifaddr' output, or "".
+func parseLeaseIPv4(domifaddrOutput string) string {
+	for _, line := range strings.Split(domifaddrOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < domifaddrMinimumFields || fields[domifaddrProtocolColumn] != "ipv4" {
+			continue
+		}
+		leasedIP, _, err := net.ParseCIDR(fields[domifaddrAddressColumn])
+		if err == nil && leasedIP.To4() != nil {
+			return leasedIP.String()
+		}
+	}
+	return ""
 }
 
 // State returns the current state of a VM (running, shut off, etc).

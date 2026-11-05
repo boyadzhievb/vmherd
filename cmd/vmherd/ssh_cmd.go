@@ -27,15 +27,14 @@ func newSSHCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targetVM := vms[0]
-
-			if targetVM.Network.IP == "" {
-				return fmt.Errorf("VM %q has no IP address configured", vmName)
-			}
-
-			domainName := project.DomainName(targetVM.Name)
+			domainName := project.DomainName(vms[0].Name)
 			if vm.State(domainName) != vm.StateRunning {
 				return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmName, vmName)
+			}
+
+			targetVM, err := withCurrentAddress(project, vms[0])
+			if err != nil {
+				return err
 			}
 
 			keyPath := project.SSHKeyPath()

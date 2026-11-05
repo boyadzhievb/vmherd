@@ -47,6 +47,7 @@ Examples:
 			}
 
 			if len(restartedVMs) > 0 {
+				restartedVMs = waitForAddresses(project, restartedVMs)
 				waitForSSHInParallel(restartedVMs, keyPath, project.Herdfile.SSH.User)
 				startPortForwardingForVMs(project, restartedVMs)
 			}
