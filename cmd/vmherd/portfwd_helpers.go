@@ -16,16 +16,26 @@ func startPortForwardingForVMs(project *config.Project, vms []config.VM) {
 		if vmConfig.Network.IP == "" {
 			continue
 		}
-		if err := portfwd.Start(portForwardTunnel(project, vmConfig)); err != nil {
+		tunnel := portForwardTunnel(project, vmConfig)
+		if err := portfwd.RemoveLegacyRules(tunnel.GuestIP, tunnel.Forwards); err != nil {
+			ui.Printf("Warning: %v\n", err)
+		}
+		if err := portfwd.Start(tunnel); err != nil {
 			ui.Printf("Warning: port forwarding for %s failed: %v\n", vmConfig.Name, err)
 		}
 	}
 }
 
-// stopPortForwarding stops a VM's SSH port-forward tunnel, if one runs.
+// stopPortForwarding stops a VM's SSH port-forward tunnel, if one runs, and
+// removes iptables rules vmherd v0.1.x left for it (v0.1.x VMs always have a
+// static ip, so the Herdfile value is the right one here).
 func stopPortForwarding(project *config.Project, vmConfig config.VM) {
 	if err := portfwd.Stop(vmStateDir(project, vmConfig)); err != nil {
 		ui.Printf("Warning: could not stop port forwarding for %s: %v\n", vmConfig.Name, err)
+	}
+	tunnel := portForwardTunnel(project, vmConfig)
+	if err := portfwd.RemoveLegacyRules(tunnel.GuestIP, tunnel.Forwards); err != nil {
+		ui.Printf("Warning: %v\n", err)
 	}
 }
 

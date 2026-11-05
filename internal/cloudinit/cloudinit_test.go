@@ -291,8 +291,8 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 
 	expectedFragments := []string{
 		"runcmd:",
-		"mkdir -p /vagrant",
-		"mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 /vagrant",
+		"mkdir -p '/vagrant'",
+		"mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'",
 		"mounts:",
 		`  - [vmherd_share_0, /vagrant, 9p, "trans=virtio,version=9p2000.L,noatime,nofail", "0", "0"]`,
 		"  - name: vmherd\n    uid: 1001\n",
@@ -387,8 +387,8 @@ func TestGenerateFilesWithMultipleSharedMounts(t *testing.T) {
 	userDataContent := string(userData)
 
 	expectedFragments := []string{
-		"mkdir -p /vagrant",
-		"mkdir -p /data",
+		"mkdir -p '/vagrant'",
+		"mkdir -p '/data'",
 		"vmherd_share_0",
 		"vmherd_share_1",
 		"mount -t 9p",
@@ -460,7 +460,7 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 		// Shell provisioning and shared mount commands share the runcmd section.
 		"runcmd:",
 		"apt-get update",
-		"mkdir -p /vagrant",
+		"mkdir -p '/vagrant'",
 		"mount -t 9p",
 		"vmherd_share_0",
 		// Shared mounts produce the mounts section.
@@ -477,6 +477,15 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 	runcmdCount := strings.Count(userDataContent, "runcmd:")
 	if runcmdCount != 1 {
 		t.Errorf("expected exactly 1 runcmd section, found %d", runcmdCount)
+	}
+
+	// The home fix runs before provisioning (which may use ~), the share
+	// fallback mount after it.
+	homeFixIndex := strings.Index(userDataContent, `chown vmherd: \"$(getent passwd vmherd | cut -d: -f6)\"`)
+	provisionIndex := strings.Index(userDataContent, "apt-get update")
+	mountIndex := strings.Index(userDataContent, "mountpoint -q '/vagrant'")
+	if homeFixIndex < 0 || provisionIndex < 0 || mountIndex < 0 || homeFixIndex > provisionIndex || provisionIndex > mountIndex {
+		t.Errorf("runcmd order must be home fix (%d) < provisioning (%d) < share mount (%d):\n%s", homeFixIndex, provisionIndex, mountIndex, userDataContent)
 	}
 }
 
@@ -767,5 +776,30 @@ func TestGenerateFilesNetworkConfigDHCP(t *testing.T) {
 	macAddress, err := ReadSavedMACAddress(stateDir, "dhcpvm")
 	if err != nil || macAddress != "52:54:00:aa:bb:cc" {
 		t.Errorf("ReadSavedMACAddress = %q, %v; want the MAC from the DHCP config", macAddress, err)
+	}
+}
+
+func TestGenerateFilesWithoutSharesHasNoHomeFixOrRuncmd(t *testing.T) {
+	stateDir := t.TempDir()
+	files, err := GenerateFiles(stateDir, config.VM{Name: "plain", Image: "ubuntu:noble"}, "vmherd", "", "ssh-ed25519 AAAA key", "192.168.150", "192.168.150.1", "52:54:00:aa:bb:cc", nil, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	userData, err := os.ReadFile(files.UserData)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	for _, forbidden := range []string{"runcmd:", "chown", "mounts:"} {
+		if strings.Contains(string(userData), forbidden) {
+			t.Errorf("user-data without shares or provisioning must not contain %q:\n%s", forbidden, userData)
+		}
+	}
+}
+
+func TestSharedMountRuncmdsQuoteGuestPath(t *testing.T) {
+	runcmds := sharedMountRuncmds([]SharedMount{{MountTag: "vmherd_share_0", GuestPath: "/home/me/my app's"}})
+	wantMount := `mountpoint -q '/home/me/my app'\''s' || mount -t 9p -o ` + sharedMountOptions + ` vmherd_share_0 '/home/me/my app'\''s'`
+	if len(runcmds) != 2 || runcmds[0] != `mkdir -p '/home/me/my app'\''s'` || runcmds[1] != wantMount {
+		t.Errorf("sharedMountRuncmds() = %q", runcmds)
 	}
 }

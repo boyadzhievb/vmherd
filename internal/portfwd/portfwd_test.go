@@ -186,3 +186,24 @@ func TestForwardsNotHeldBy(t *testing.T) {
 		t.Errorf("without a running tunnel every forward must be checked, got %v", gotAll)
 	}
 }
+
+func TestMatchingLegacyRules(t *testing.T) {
+	ruleListing := `-P PREROUTING ACCEPT
+-A PREROUTING -j CCA_SERVICES
+-A PREROUTING -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22
+-A PREROUTING -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.99:22
+-A PREROUTING -p tcp -m tcp --dport 5000 -j DNAT --to-destination 172.17.0.2:5000
+-A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22
+-A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22
+-A DOCKER ! -i docker0 -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22
+`
+	got := matchingLegacyRules(ruleListing, "192.168.151.10", []ssh.LocalForward{{HostIP: "127.0.0.1", HostPort: 18090, GuestPort: 22}})
+	want := []string{
+		"-A PREROUTING -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22",
+		"-A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22",
+		"-A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 18090 -j DNAT --to-destination 192.168.151.10:22",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("matchingLegacyRules() =\n%v\nwant (only exact v0.1.x rules for this VM, duplicates kept)\n%v", got, want)
+	}
+}

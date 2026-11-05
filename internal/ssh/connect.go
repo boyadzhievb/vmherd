@@ -1,8 +1,7 @@
 package ssh
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,8 +18,8 @@ const (
 	maxRetryInterval = 16 * time.Second
 	// defaultWaitTimeout is the total time WaitForSSH will keep retrying.
 	defaultWaitTimeout = 180 * time.Second
-	// uploadNameRandomBytes is the randomness in provision upload file names.
-	uploadNameRandomBytes = 8
+	// remoteUploadTemplate is the mktemp template for provision uploads on the VM.
+	remoteUploadTemplate = "/tmp/vmherd-upload.XXXXXXXXXX"
 	// tunnelKeepaliveIntervalSeconds is how often a port-forward tunnel checks the VM is alive.
 	tunnelKeepaliveIntervalSeconds = 15
 	// tunnelKeepaliveMaxMissed is how many missed keepalives end a tunnel (about 45s).
@@ -59,20 +58,20 @@ func RunScriptAsRoot(keyPath, user, ip, script string) error {
 
 // InstallFileAsRoot copies localPath to destination on a VM as root:root with
 // fileMode, like cloud-init write_files does on first boot. scp uploads to a
-// random name in the SSH user's home, then 'sudo install' moves it into place,
-// so root-owned destinations and files from first boot can be replaced.
+// private temp file from 'mktemp' (not the home directory, which may not be
+// writable), then 'sudo install' moves it into place.
 func InstallFileAsRoot(keyPath, user, ip, localPath, destination, fileMode string) error {
-	uploadName, err := randomUploadName()
+	uploadPath, err := createRemoteUploadFile(keyPath, user, ip)
 	if err != nil {
 		return err
 	}
 
-	remoteUploadTarget := fmt.Sprintf("%s@%s:%s", user, ip, uploadName)
+	remoteUploadTarget := fmt.Sprintf("%s@%s:%s", user, ip, uploadPath)
 	if err := CopyFiles(keyPath, user, []string{localPath, remoteUploadTarget}); err != nil {
-		return fmt.Errorf("uploading %s to %s: %w", localPath, ip, err)
+		return errors.Join(fmt.Errorf("uploading %s to %s: %w", localPath, ip, err), removeRemoteUploadFile(keyPath, user, ip, uploadPath))
 	}
 
-	installArgs := append(sshBaseArgs(keyPath, user, ip), installUploadCommandLine(uploadName, destination, fileMode))
+	installArgs := append(sshBaseArgs(keyPath, user, ip), installUploadCommandLine(uploadPath, destination, fileMode))
 	cmd := exec.Command("ssh", installArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -82,21 +81,42 @@ func InstallFileAsRoot(keyPath, user, ip, localPath, destination, fileMode strin
 	return nil
 }
 
-// randomUploadName returns a hidden, unguessable file name for a provision
-// upload in the SSH user's home directory.
-func randomUploadName() (string, error) {
-	randomBytes := make([]byte, uploadNameRandomBytes)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return "", fmt.Errorf("generating upload file name: %w", err)
+// createRemoteUploadFile runs 'mktemp' on the VM and returns the path of the
+// new empty file, which only the SSH user can read or write.
+func createRemoteUploadFile(keyPath, user, ip string) (string, error) {
+	mktempArgs := append(sshBaseArgs(keyPath, user, ip), "mktemp "+quoteForShell(remoteUploadTemplate))
+	output, err := exec.Command("ssh", mktempArgs...).Output()
+	if err != nil {
+		return "", fmt.Errorf("creating an upload file on %s with mktemp: %w", ip, err)
 	}
-	return ".vmherd-upload-" + hex.EncodeToString(randomBytes), nil
+	uploadPath := strings.TrimSpace(string(output))
+	if !isRemoteUploadPath(uploadPath) {
+		return "", fmt.Errorf("mktemp on %s returned an unexpected path %q", ip, uploadPath)
+	}
+	return uploadPath, nil
+}
+
+// isRemoteUploadPath reports whether path looks like a file mktemp made from
+// remoteUploadTemplate, so a garbled reply is never used as a scp target.
+func isRemoteUploadPath(path string) bool {
+	prefix := strings.TrimRight(remoteUploadTemplate, "X")
+	return strings.HasPrefix(path, prefix) && len(path) == len(remoteUploadTemplate) && !strings.ContainsAny(path, " \t\n'\"")
+}
+
+// removeRemoteUploadFile deletes an upload file after a failed copy.
+func removeRemoteUploadFile(keyPath, user, ip, uploadPath string) error {
+	removeArgs := append(sshBaseArgs(keyPath, user, ip), "rm -f -- "+quoteForShell(uploadPath))
+	if err := exec.Command("ssh", removeArgs...).Run(); err != nil {
+		return fmt.Errorf("removing upload file %s on %s: %w", uploadPath, ip, err)
+	}
+	return nil
 }
 
 // installUploadCommandLine returns the remote command line that installs the
 // uploaded file at destination (creating parent directories) and always
 // removes the upload, keeping the install's exit status.
-func installUploadCommandLine(uploadName, destination, fileMode string) string {
-	quotedUpload := quoteForShell(uploadName)
+func installUploadCommandLine(uploadPath, destination, fileMode string) string {
+	quotedUpload := quoteForShell(uploadPath)
 	return fmt.Sprintf("sudo install -D -m %s -- %s %s; installStatus=$?; rm -f -- %s; exit $installStatus",
 		quoteForShell(fileMode), quotedUpload, quoteForShell(destination), quotedUpload)
 }

@@ -84,25 +84,28 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 	builder.WriteString("package_update: false\n")
 	builder.WriteString("package_upgrade: false\n")
 
-	hasRuncmdSection := false
-	if len(vm.Provision) > 0 {
-		wroteRuncmds, err := writeProvisionEntries(&builder, vm.Provision)
-		if err != nil {
-			return err
-		}
-		hasRuncmdSection = wroteRuncmds
+	provisionRuncmds, err := writeProvisionFiles(&builder, vm.Provision)
+	if err != nil {
+		return err
 	}
 
+	// Order matters: the home fix must run before provisioning uses ~, and the
+	// share fallback mounts come last.
+	var runcmds []string
 	if len(sharedMounts) > 0 {
-		writeSharedMountEntries(&builder, sharedMounts, hasRuncmdSection)
+		runcmds = append(runcmds, homeOwnershipCommand(sshUser))
 	}
+	runcmds = append(runcmds, provisionRuncmds...)
+	runcmds = append(runcmds, sharedMountRuncmds(sharedMounts)...)
+	writeRuncmdEntries(&builder, runcmds)
+	writeMountsEntries(&builder, sharedMounts)
 
 	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o600)
 }
 
-// writeProvisionEntries appends cloud-init write_files and runcmd entries for provisioning steps.
-// Returns true if a runcmd section was written (so shared mounts can append to it).
-func writeProvisionEntries(builder *strings.Builder, provisions []config.Provision) (bool, error) {
+// writeProvisionFiles appends cloud-init write_files entries for file
+// provisioning steps and returns the shell steps' scripts for runcmd.
+func writeProvisionFiles(builder *strings.Builder, provisions []config.Provision) ([]string, error) {
 	var runcmds []string
 	var writeFiles []config.Provision
 
@@ -122,7 +125,7 @@ func writeProvisionEntries(builder *strings.Builder, provisions []config.Provisi
 		for _, wf := range writeFiles {
 			content, err := os.ReadFile(wf.Source)
 			if err != nil {
-				return false, fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
+				return nil, fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
 			}
 			encoded := base64.StdEncoding.EncodeToString(content)
 			fmt.Fprintf(builder, "  - path: %s\n", wf.Destination)
@@ -131,12 +134,18 @@ func writeProvisionEntries(builder *strings.Builder, provisions []config.Provisi
 			builder.WriteString("    permissions: '0644'\n")
 		}
 	}
-
-	writeRuncmdEntries(builder, runcmds)
-	return len(runcmds) > 0, nil
+	return runcmds, nil
 }
 
-// writeRuncmdEntries appends cloud-init runcmd entries for shell provisioning steps.
+// homeOwnershipCommand returns a runcmd that gives the SSH user its home
+// directory back. cloud-init creates share mount points (for example
+// /home/vagrant/app) before it creates the user, so the home directory ends
+// up root-owned. Only the directory itself is changed, not its contents.
+func homeOwnershipCommand(sshUser string) string {
+	return fmt.Sprintf(`chown %s: "$(getent passwd %s | cut -d: -f6)"`, sshUser, sshUser)
+}
+
+// writeRuncmdEntries appends the cloud-init runcmd section, one bash -c entry per command.
 func writeRuncmdEntries(builder *strings.Builder, runcmds []string) {
 	if len(runcmds) == 0 {
 		return
@@ -153,21 +162,36 @@ func writeRuncmdEntries(builder *strings.Builder, runcmds []string) {
 // every read.
 const sharedMountOptions = "trans=virtio,version=9p2000.L,noatime,nofail"
 
-// writeSharedMountEntries appends runcmd and mounts entries for 9p shared folders.
-func writeSharedMountEntries(builder *strings.Builder, sharedMounts []SharedMount, hasProvisionRuncmds bool) {
-	if !hasProvisionRuncmds {
-		builder.WriteString("runcmd:\n")
-	}
+// sharedMountRuncmds returns runcmd entries that create each share's mount
+// point and mount it if the mounts module didn't already (a second mount
+// would fail and mark the whole cloud-init run as failed).
+func sharedMountRuncmds(sharedMounts []SharedMount) []string {
+	var runcmds []string
 	for _, mount := range sharedMounts {
-		mkdirCommand := fmt.Sprintf("mkdir -p %s", mount.GuestPath)
-		mountCommand := fmt.Sprintf("mount -t 9p -o %s %s %s", sharedMountOptions, mount.MountTag, mount.GuestPath)
-		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mkdirCommand)
-		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", mountCommand)
+		quotedGuestPath := quoteForShell(mount.GuestPath)
+		runcmds = append(runcmds,
+			fmt.Sprintf("mkdir -p %s", quotedGuestPath),
+			fmt.Sprintf("mountpoint -q %s || mount -t 9p -o %s %s %s", quotedGuestPath, sharedMountOptions, mount.MountTag, quotedGuestPath))
+	}
+	return runcmds
+}
+
+// writeMountsEntries appends the cloud-init mounts section (fstab entries)
+// for 9p shared folders.
+func writeMountsEntries(builder *strings.Builder, sharedMounts []SharedMount) {
+	if len(sharedMounts) == 0 {
+		return
 	}
 	builder.WriteString("mounts:\n")
 	for _, mount := range sharedMounts {
 		fmt.Fprintf(builder, "  - [%s, %s, 9p, \"%s\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath, sharedMountOptions)
 	}
+}
+
+// quoteForShell wraps value in single quotes for a POSIX shell. Each embedded
+// single quote closes the quoting, adds a backslash-escaped quote and reopens.
+func quoteForShell(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // writeNetworkConfig generates the cloud-init network-config file. With an

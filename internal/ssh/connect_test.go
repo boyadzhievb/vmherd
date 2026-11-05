@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -160,20 +159,19 @@ func TestRootScriptCommandLineSurvivesShell(t *testing.T) {
 	}
 }
 
-func TestRandomUploadName(t *testing.T) {
-	firstName, err := randomUploadName()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestIsRemoteUploadPath(t *testing.T) {
+	testCases := map[string]bool{
+		"/tmp/vmherd-upload.Ab3dE5gH9k":  true,
+		"/tmp/vmherd-upload.short":       false,
+		"/etc/vmherd-upload.Ab3dE5gH9k":  false,
+		"/tmp/vmherd-upload.Ab3 E5gH9k":  false,
+		"":                               false,
+		"/tmp/vmherd-upload.Ab3dE5gH9kX": false,
 	}
-	secondName, err := randomUploadName()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !regexp.MustCompile(`^\.vmherd-upload-[0-9a-f]{16}$`).MatchString(firstName) {
-		t.Errorf("upload name %q is not a hidden name with %d random bytes", firstName, uploadNameRandomBytes)
-	}
-	if firstName == secondName {
-		t.Errorf("two upload names are equal: %s", firstName)
+	for path, want := range testCases {
+		if got := isRemoteUploadPath(path); got != want {
+			t.Errorf("isRemoteUploadPath(%q) = %v, want %v", path, got, want)
+		}
 	}
 }
 
