@@ -21,6 +21,10 @@ const (
 	defaultWaitTimeout = 180 * time.Second
 	// uploadNameRandomBytes is the randomness in provision upload file names.
 	uploadNameRandomBytes = 8
+	// tunnelKeepaliveIntervalSeconds is how often a port-forward tunnel checks the VM is alive.
+	tunnelKeepaliveIntervalSeconds = 15
+	// tunnelKeepaliveMaxMissed is how many missed keepalives end a tunnel (about 45s).
+	tunnelKeepaliveMaxMissed = 3
 )
 
 // Connect opens an interactive SSH session to a VM, or runs a command if provided.
@@ -121,6 +125,40 @@ func remoteCommandLine(command []string) string {
 // single quote closes the quoting, adds a backslash-escaped quote and reopens.
 func quoteForShell(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// LocalForward is one 'ssh -L' mapping from a host address and port to a port
+// on the VM's own localhost.
+type LocalForward struct {
+	HostIP    string // host address to listen on (127.0.0.1, 0.0.0.0, ::1, …)
+	HostPort  int    // port to listen on
+	GuestPort int    // port on the VM's localhost to connect to
+}
+
+// TunnelArgs returns the ssh arguments (without "ssh") for a background tunnel
+// carrying forwards to a VM. The tunnel exits if any port can't be bound or the
+// VM stops answering, so a dead tunnel is never mistaken for a working one.
+func TunnelArgs(keyPath, user, ip string, forwards []LocalForward) []string {
+	args := []string{
+		"-N",
+		"-o", "ExitOnForwardFailure=yes",
+		"-o", fmt.Sprintf("ServerAliveInterval=%d", tunnelKeepaliveIntervalSeconds),
+		"-o", fmt.Sprintf("ServerAliveCountMax=%d", tunnelKeepaliveMaxMissed),
+	}
+	for _, forward := range forwards {
+		args = append(args, "-L", fmt.Sprintf("%s:localhost:%d", forward.ListenSpec(), forward.GuestPort))
+	}
+	return append(args, sshBaseArgs(keyPath, user, ip)...)
+}
+
+// ListenSpec returns the host side of the forward as written in 'ssh -L':
+// "127.0.0.1:8080", or "[::1]:8080" for IPv6.
+func (localForward LocalForward) ListenSpec() string {
+	bindAddress := localForward.HostIP
+	if strings.Contains(bindAddress, ":") {
+		bindAddress = "[" + bindAddress + "]"
+	}
+	return fmt.Sprintf("%s:%d", bindAddress, localForward.HostPort)
 }
 
 // CopyFiles runs scp between the local host and a VM.

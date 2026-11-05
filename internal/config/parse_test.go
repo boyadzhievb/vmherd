@@ -310,7 +310,7 @@ vms:
 	}
 }
 
-func TestPortForwardExplicitProtocol(t *testing.T) {
+func TestPortForwardRefusesUDP(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
 vms:
@@ -325,13 +325,51 @@ vms:
 		t.Fatal(err)
 	}
 
-	hf, err := Load(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "TCP only") {
+		t.Fatalf("expected an error explaining udp is unsupported, got %v", err)
 	}
+}
 
-	if hf.VMs[0].Ports[0].Protocol != "udp" {
-		t.Errorf("expected protocol 'udp', got %q", hf.VMs[0].Ports[0].Protocol)
+func TestPortForwardHostIP(t *testing.T) {
+	testCases := []struct {
+		hostIPLine string // host_ip line in the Herdfile, "" to omit it
+		wantHostIP string // host_ip after defaults; "" means a validation error
+	}{
+		{"", "127.0.0.1"},
+		{"host_ip: 0.0.0.0", "0.0.0.0"},
+		{"host_ip: 192.168.100.49", "192.168.100.49"},
+		{"host_ip: \"::1\"", "::1"},
+		{"host_ip: localhost", ""},
+		{"host_ip: 1.2.3", ""},
+	}
+	for _, testCase := range testCases {
+		dir := t.TempDir()
+		herdfile := `
+vms:
+  - name: web
+    image: ubuntu:noble
+    ports:
+      - host: 8080
+        guest: 80
+        ` + testCase.hostIPLine + "\n"
+		if err := os.WriteFile(filepath.Join(dir, HerdfileName), []byte(herdfile), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		hf, err := Load(dir)
+		if testCase.wantHostIP == "" {
+			if err == nil || !strings.Contains(err.Error(), "not an IP address") {
+				t.Errorf("%q: expected an actionable host_ip error, got %v", testCase.hostIPLine, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%q: unexpected error: %v", testCase.hostIPLine, err)
+			continue
+		}
+		if gotHostIP := hf.VMs[0].Ports[0].HostIP; gotHostIP != testCase.wantHostIP {
+			t.Errorf("%q: host_ip = %q, want %q", testCase.hostIPLine, gotHostIP, testCase.wantHostIP)
+		}
 	}
 }
 

@@ -239,3 +239,22 @@ func TestInstallUploadCommandLineKeepsFailureAndCleansUp(t *testing.T) {
 		t.Errorf("upload was not removed after a failed install: %v", err)
 	}
 }
+
+func TestTunnelArgs(t *testing.T) {
+	args := TunnelArgs("/state/id_ed25519", "vmherd", "192.168.150.10", []LocalForward{
+		{HostIP: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+		{HostIP: "::1", HostPort: 8443, GuestPort: 443},
+	})
+	joinedArgs := strings.Join(args, " ")
+	for _, wantPart := range []string{
+		"-N", "ExitOnForwardFailure=yes", "ServerAliveInterval=15", "ServerAliveCountMax=3",
+		"-L 127.0.0.1:8080:localhost:80", "-L [::1]:8443:localhost:443", "-i /state/id_ed25519",
+	} {
+		if !strings.Contains(joinedArgs, wantPart) {
+			t.Errorf("tunnel args missing %q: %s", wantPart, joinedArgs)
+		}
+	}
+	if args[len(args)-1] != "vmherd@192.168.150.10" {
+		t.Errorf("destination must come last (options after it would be a remote command), got %q", args[len(args)-1])
+	}
+}

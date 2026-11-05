@@ -1,51 +1,51 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/portfwd"
+	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
-// hasPortForwards returns true if any VM in the list has port forward rules configured.
-func hasPortForwards(vms []config.VM) bool {
+// startPortForwardingForVMs starts (or keeps, or updates) the SSH port-forward
+// tunnel of each VM. Call it after SSH is ready. Failures are warnings.
+func startPortForwardingForVMs(project *config.Project, vms []config.VM) {
 	for _, vmConfig := range vms {
-		if len(vmConfig.Ports) > 0 && vmConfig.Network.IP != "" {
-			return true
+		if vmConfig.Network.IP == "" {
+			continue
+		}
+		if err := portfwd.Start(portForwardTunnel(project, vmConfig)); err != nil {
+			ui.Printf("Warning: port forwarding for %s failed: %v\n", vmConfig.Name, err)
 		}
 	}
-	return false
 }
 
-// setupPortForwarding removes any stale rules then installs iptables DNAT rules for a VM's port forwards.
-func setupPortForwarding(vmConfig config.VM) {
-	if len(vmConfig.Ports) == 0 || vmConfig.Network.IP == "" {
-		return
-	}
-	rules := buildPortForwardRules(vmConfig)
-	portfwd.Teardown(rules)
-	if err := portfwd.Setup(rules); err != nil {
-		ui.Printf("Warning: port forwarding setup failed for %s: %v\n", vmConfig.Name, err)
+// stopPortForwarding stops a VM's SSH port-forward tunnel, if one runs.
+func stopPortForwarding(project *config.Project, vmConfig config.VM) {
+	if err := portfwd.Stop(vmStateDir(project, vmConfig)); err != nil {
+		ui.Printf("Warning: could not stop port forwarding for %s: %v\n", vmConfig.Name, err)
 	}
 }
 
-// teardownPortForwarding removes iptables DNAT rules for a VM's port forwards.
-func teardownPortForwarding(vmConfig config.VM) {
-	if len(vmConfig.Ports) == 0 || vmConfig.Network.IP == "" {
-		return
+// portForwardTunnel describes the SSH tunnel carrying a VM's Herdfile ports.
+func portForwardTunnel(project *config.Project, vmConfig config.VM) portfwd.Tunnel {
+	forwards := make([]ssh.LocalForward, len(vmConfig.Ports))
+	for index, portForward := range vmConfig.Ports {
+		forwards[index] = ssh.LocalForward{HostIP: portForward.HostIP, HostPort: portForward.Host, GuestPort: portForward.Guest}
 	}
-	portfwd.Teardown(buildPortForwardRules(vmConfig))
+	return portfwd.Tunnel{
+		VMName:     vmConfig.Name,
+		VMStateDir: vmStateDir(project, vmConfig),
+		KeyPath:    project.SSHKeyPath(),
+		User:       project.Herdfile.SSH.User,
+		GuestIP:    vmConfig.Network.IP,
+		Forwards:   forwards,
+	}
 }
 
-// buildPortForwardRules converts Herdfile port forward config into portfwd.Rule slice.
-func buildPortForwardRules(vmConfig config.VM) []portfwd.Rule {
-	rules := make([]portfwd.Rule, len(vmConfig.Ports))
-	for i, pf := range vmConfig.Ports {
-		rules[i] = portfwd.Rule{
-			HostPort:  pf.Host,
-			GuestIP:   vmConfig.Network.IP,
-			GuestPort: pf.Guest,
-			Protocol:  pf.Protocol,
-		}
-	}
-	return rules
+// vmStateDir returns the per-VM state directory (cloud-init seed, tunnel record).
+func vmStateDir(project *config.Project, vmConfig config.VM) string {
+	return filepath.Join(project.StateDir, vmConfig.Name)
 }

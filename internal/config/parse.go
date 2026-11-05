@@ -18,6 +18,7 @@ const (
 	maxPort = 65535
 
 	defaultPortProtocol      = "tcp"
+	defaultPortHostIP        = "127.0.0.1" // forwarded ports are local-only unless host_ip says otherwise
 	defaultSharedFolderHost  = "."
 	defaultSharedFolderGuest = "/vagrant"
 
@@ -101,6 +102,9 @@ func applyDefaults(herdfile *Herdfile, dir string) {
 		for j := range herdfile.VMs[i].Ports {
 			if herdfile.VMs[i].Ports[j].Protocol == "" {
 				herdfile.VMs[i].Ports[j].Protocol = defaultPortProtocol
+			}
+			if herdfile.VMs[i].Ports[j].HostIP == "" {
+				herdfile.VMs[i].Ports[j].HostIP = defaultPortHostIP
 			}
 		}
 	}
@@ -312,10 +316,16 @@ func validatePortForwards(vmConfig VM, usedHostPorts map[string]string) error {
 		if portForward.Guest < minPort || portForward.Guest > maxPort {
 			return fmt.Errorf("VM %q: guest port %d is out of range (%d-%d)", vmConfig.Name, portForward.Guest, minPort, maxPort)
 		}
-		if portForward.Protocol != "tcp" && portForward.Protocol != "udp" {
-			return fmt.Errorf("VM %q: port protocol must be 'tcp' or 'udp', got %q", vmConfig.Name, portForward.Protocol)
+		if portForward.Protocol != defaultPortProtocol {
+			return fmt.Errorf("VM %q: port %d uses protocol %q, but only 'tcp' is supported — vmherd forwards ports over SSH, which carries TCP only",
+				vmConfig.Name, portForward.Host, portForward.Protocol)
+		}
+		if net.ParseIP(portForward.HostIP) == nil {
+			return fmt.Errorf("VM %q: port %d has host_ip %q, which is not an IP address — use 127.0.0.1 (this machine only), 0.0.0.0 (all interfaces) or one of the host's addresses",
+				vmConfig.Name, portForward.Host, portForward.HostIP)
 		}
 
+		// Keyed by port alone: 0.0.0.0:8080 and 127.0.0.1:8080 can't both be bound.
 		portKey := fmt.Sprintf("%d/%s", portForward.Host, portForward.Protocol)
 		if existingVM, taken := usedHostPorts[portKey]; taken {
 			return fmt.Errorf("VM %q: host port %s is already forwarded by VM %q", vmConfig.Name, portKey, existingVM)

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
-	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -37,12 +36,6 @@ Examples:
 				return err
 			}
 
-			if hasPortForwards(vmsToRestart) {
-				if err := portfwd.CheckBackend(); err != nil {
-					return err
-				}
-			}
-
 			keyPath, err := ssh.EnsureKeyPair(project.StateDir, "vmherd-"+project.Name)
 			if err != nil {
 				return err
@@ -55,6 +48,7 @@ Examples:
 
 			if len(restartedVMs) > 0 {
 				waitForSSHInParallel(restartedVMs, keyPath, project.Herdfile.SSH.User)
+				startPortForwardingForVMs(project, restartedVMs)
 			}
 
 			ui.Println("Restart complete.")
@@ -86,7 +80,7 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 	for _, vmConfig := range runningVMs {
 		domainName := project.DomainName(vmConfig.Name)
 		ui.Printf("Stopping %s...\n", vmConfig.Name)
-		teardownPortForwarding(vmConfig)
+		stopPortForwarding(project, vmConfig)
 		if err := vm.Shutdown(domainName); err != nil {
 			ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
 		}
@@ -115,7 +109,6 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 		if err := vm.Start(domainName); err != nil {
 			return nil, fmt.Errorf("cannot start %s: %w", vmConfig.Name, err)
 		}
-		setupPortForwarding(vmConfig)
 		startedVMs = append(startedVMs, vmConfig)
 	}
 

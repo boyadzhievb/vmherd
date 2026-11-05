@@ -34,7 +34,8 @@ type SharedFolder struct {
 type PortForward struct {
 	Host     int    `yaml:"host"`     // port number on the host
 	Guest    int    `yaml:"guest"`    // port number inside the guest
-	Protocol string `yaml:"protocol"` // "tcp" or "udp"
+	Protocol string `yaml:"protocol"` // only "tcp": ports are forwarded over SSH
+	HostIP   string `yaml:"host_ip"`  // host address to listen on; defaults to 127.0.0.1 (this machine only)
 }
 
 // VMNetworkConfig holds per-VM network settings.

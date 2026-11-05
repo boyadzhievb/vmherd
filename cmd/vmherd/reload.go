@@ -10,7 +10,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/network"
-	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -45,12 +44,6 @@ Examples:
 				return err
 			}
 
-			if hasPortForwards(vmsToReload) {
-				if err := portfwd.CheckBackend(); err != nil {
-					return err
-				}
-			}
-
 			subnetBase, err := project.SubnetBase()
 			if err != nil {
 				return err
@@ -80,7 +73,7 @@ Examples:
 			for _, vmConfig := range vmsToReload {
 				domainName := project.DomainName(vmConfig.Name)
 
-				teardownPortForwarding(vmConfig)
+				stopPortForwarding(project, vmConfig)
 
 				if err := shutdownAndDestroy(domainName, vmConfig.Name); err != nil {
 					return err
@@ -93,8 +86,6 @@ Examples:
 				if err := createVM(project, vmConfig, domainName, pubKey, subnetBase, dnsServer); err != nil {
 					return err
 				}
-
-				setupPortForwarding(vmConfig)
 			}
 
 			ui.Println("\nWaiting for SSH on reloaded VMs...")
@@ -110,6 +101,7 @@ Examples:
 				}
 				ui.Println(" ready")
 			}
+			startPortForwardingForVMs(project, vmsToReload)
 
 			ui.Println("Reload complete.")
 			return nil

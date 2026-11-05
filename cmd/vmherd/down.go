@@ -39,7 +39,7 @@ func newDownCmd() *cobra.Command {
 
 				shutdownSent = true
 				ui.Printf("Stopping %s...\n", vmConfig.Name)
-				teardownPortForwarding(vmConfig)
+				stopPortForwarding(project, vmConfig)
 				if err := vm.Shutdown(domainName); err != nil {
 					ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
 				}

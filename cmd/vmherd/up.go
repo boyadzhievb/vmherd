@@ -9,7 +9,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/network"
-	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -46,12 +45,6 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			if hasPortForwards(vms) {
-				if err := portfwd.CheckBackend(); err != nil {
-					return err
-				}
-			}
-
 			subnetBase, err := project.SubnetBase()
 			if err != nil {
 				return err
@@ -84,6 +77,7 @@ func newUpCmd() *cobra.Command {
 			}
 
 			waitForSSHInParallel(activeVMs, keyPath, project.Herdfile.SSH.User)
+			startPortForwardingForVMs(project, activeVMs)
 
 			ui.Println("\nAll VMs ready:")
 			for _, vmConfig := range activeVMs {
@@ -111,7 +105,6 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 
 		if state == vm.StateRunning {
 			ui.Printf("%s is already running.\n", vmConfig.Name)
-			setupPortForwarding(vmConfig)
 			activeVMs = append(activeVMs, vmConfig)
 			continue
 		}
@@ -121,7 +114,6 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 			if err := vm.Start(domainName); err != nil {
 				return nil, err
 			}
-			setupPortForwarding(vmConfig)
 			activeVMs = append(activeVMs, vmConfig)
 			continue
 		}
@@ -146,7 +138,6 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 			fmt.Fprintf(os.Stderr, "Error creating %s: %v\n", result.vmConfig.Name, result.err)
 			failCount++
 		} else {
-			setupPortForwarding(result.vmConfig)
 			activeVMs = append(activeVMs, result.vmConfig)
 		}
 	}
