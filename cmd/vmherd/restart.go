@@ -27,7 +27,7 @@ Examples:
   vmherd restart
   vmherd restart ctrl worker-1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}

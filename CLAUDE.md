@@ -125,7 +125,7 @@ Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM 
 
 - Image cache: `~/.vmherd/images/`
 - VM state per project: `$XDG_STATE_HOME/vmherd/<project>-<hash>/` (~/.local/state/vmherd/ by default). Override with `VMHERD_STATE_DIR` env var. Query path with `vmherd info ssh-key` or `vmherd info state-dir`.
-- Disk images: `/var/lib/libvirt/images/vmherd-<project>-<name>.qcow2`
+- Libvirt domains and disks: `vmherd-<project>-<hash>-<name>` (`/var/lib/libvirt/images/vmherd-<project>-<hash>-<name>.qcow2`). `<project>` is the directory name reduced to `[a-z0-9-]`; `<hash>` is the first 8 hex chars of the state-dir hash. VMs created before M0.8 keep their `vmherd-<project>-<name>` domain while its MAC matches this project's saved network-config; `vmherd reload` moves them to the new name.
 - Networks: libvirt networks prefixed `vmherd-`
 
 ### Provisioning via cloud-init

@@ -3,6 +3,7 @@ package vm
 import (
 	"crypto/rand"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 
@@ -36,6 +37,11 @@ func GenerateMACAddress() (string, error) {
 // ignores guest chown requests QEMU is not allowed to perform.
 const sharedFolderAccessMode = "squash"
 
+// unsafeVirtInstallPathCharacters can't be passed inside a quoted virt-install
+// value: virt-install double-escapes '"' in the domain XML, and line breaks
+// would end the argument.
+const unsafeVirtInstallPathCharacters = "\"\n\r"
+
 // SharedFolderMount describes a host directory shared with the guest via 9p virtio.
 type SharedFolderMount struct {
 	HostPath  string // absolute path on the host
@@ -68,6 +74,10 @@ func Create(opts CreateOptions) error {
 	if len(opts.SharedFolders) > 0 && opts.QEMUProcessLabel == "" {
 		return fmt.Errorf("creating VM %s: shared folders need QEMUProcessLabel so QEMU runs as the host user, not as root or libvirt-qemu", opts.VMName)
 	}
+	args, err := buildVirtInstallArgs(opts)
+	if err != nil {
+		return fmt.Errorf("creating VM %s: %w", opts.VMName, err)
+	}
 	if err := checkDiskPathAvailable(opts.DiskPath, opts.VMName); err != nil {
 		return err
 	}
@@ -75,29 +85,6 @@ func Create(opts CreateOptions) error {
 	if err := createDisk(opts.DiskPath, opts.ImagePath, opts.DiskSize); err != nil {
 		return err
 	}
-
-	args := []string{
-		"virt-install",
-		"--name", opts.DomainName,
-		"--memory", fmt.Sprintf("%d", opts.Memory),
-		"--vcpus", fmt.Sprintf("%d", opts.CPUs),
-		"--cpu", "host-passthrough",
-		"--disk", fmt.Sprintf("path=%s,format=qcow2", opts.DiskPath),
-		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
-			opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig),
-		"--network", fmt.Sprintf("network=%s,mac=%s", opts.NetworkName, opts.MACAddress),
-		"--os-variant", opts.OSVariant,
-		"--graphics", "vnc,listen=none",
-		"--noautoconsole",
-		"--import",
-		"--autostart",
-	}
-
-	if opts.ConsoleLogPath != "" {
-		args = append(args, "--serial", fmt.Sprintf("file,path=%s", opts.ConsoleLogPath))
-	}
-
-	args = append(args, sharedFolderArgs(opts.SharedFolders, opts.QEMUProcessLabel)...)
 
 	cmd := exec.Command("sudo", args...)
 	cmd.Stdout = ui.Stdout()
@@ -113,19 +100,74 @@ func Create(opts CreateOptions) error {
 	return nil
 }
 
+// buildVirtInstallArgs returns the virt-install command line for opts. Every
+// path is quoted so a comma, space or '=' in it can't split or add options;
+// paths virt-install can't carry safely are refused before anything is created.
+func buildVirtInstallArgs(opts CreateOptions) ([]string, error) {
+	quotedPaths := make(map[string]string)
+	for _, path := range []string{opts.DiskPath, opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig, opts.ConsoleLogPath} {
+		quotedPath, err := quoteVirtInstallValue(path)
+		if err != nil {
+			return nil, err
+		}
+		quotedPaths[path] = quotedPath
+	}
+
+	args := []string{
+		"virt-install",
+		"--name", opts.DomainName,
+		"--memory", fmt.Sprintf("%d", opts.Memory),
+		"--vcpus", fmt.Sprintf("%d", opts.CPUs),
+		"--cpu", "host-passthrough",
+		"--disk", fmt.Sprintf("path=%s,format=qcow2", quotedPaths[opts.DiskPath]),
+		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
+			quotedPaths[opts.CloudInitUserData], quotedPaths[opts.CloudInitMetaData], quotedPaths[opts.CloudInitNetConfig]),
+		"--network", fmt.Sprintf("network=%s,mac=%s", opts.NetworkName, opts.MACAddress),
+		"--os-variant", opts.OSVariant,
+		"--graphics", "vnc,listen=none",
+		"--noautoconsole",
+		"--import",
+		"--autostart",
+	}
+
+	if opts.ConsoleLogPath != "" {
+		args = append(args, "--serial", fmt.Sprintf("file,path=%s", quotedPaths[opts.ConsoleLogPath]))
+	}
+
+	sharedArgs, err := sharedFolderArgs(opts.SharedFolders, opts.QEMUProcessLabel)
+	if err != nil {
+		return nil, err
+	}
+	return append(args, sharedArgs...), nil
+}
+
+// quoteVirtInstallValue wraps a path in double quotes for a virt-install
+// sub-option and doubles backslashes, which virt-install unescapes inside quotes.
+// It refuses '"' (virt-install mangles it in the XML) and line breaks.
+func quoteVirtInstallValue(path string) (string, error) {
+	if strings.ContainsAny(path, unsafeVirtInstallPathCharacters) {
+		return "", fmt.Errorf("path %q contains a double quote or line break, which virt-install can't handle — rename the project directory (or the shared folder) so its path has neither", path)
+	}
+	return `"` + strings.ReplaceAll(path, `\`, `\\`) + `"`, nil
+}
+
 // sharedFolderArgs returns the virt-install arguments for 9p shared folders and,
 // when there are any, the DAC seclabel that runs QEMU as the host user so files
-// it creates are owned by that user and never by root.
-func sharedFolderArgs(sharedFolders []SharedFolderMount, qemuProcessLabel string) []string {
+// it creates are owned by that user and never by root. Host paths are quoted.
+func sharedFolderArgs(sharedFolders []SharedFolderMount, qemuProcessLabel string) ([]string, error) {
 	if len(sharedFolders) == 0 {
-		return nil
+		return nil, nil
 	}
 	args := []string{"--seclabel", fmt.Sprintf("type=static,model=dac,label=%s,relabel=yes", qemuProcessLabel)}
 	for _, sharedFolder := range sharedFolders {
+		quotedHostPath, err := quoteVirtInstallValue(sharedFolder.HostPath)
+		if err != nil {
+			return nil, fmt.Errorf("sharing %s: %w", sharedFolder.GuestPath, err)
+		}
 		args = append(args, "--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=%s",
-			sharedFolder.HostPath, sharedFolder.MountTag, sharedFolderAccessMode))
+			quotedHostPath, sharedFolder.MountTag, sharedFolderAccessMode))
 	}
-	return args
+	return args, nil
 }
 
 // Start boots a stopped VM.
@@ -170,6 +212,33 @@ func Exists(domainName string) bool {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
+}
+
+// MACAddresses returns the lowercase MAC addresses of a domain's network
+// interfaces, parsed from 'virsh domiflist'.
+func MACAddresses(domainName string) ([]string, error) {
+	output, err := exec.Command("sudo", "virsh", "domiflist", domainName).Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing interfaces of %s: %w — check that libvirtd is running", domainName, err)
+	}
+	return parseDomainInterfaceMACs(string(output)), nil
+}
+
+// parseDomainInterfaceMACs extracts the MAC column from 'virsh domiflist'
+// output. Header and separator lines carry no MAC and are skipped.
+func parseDomainInterfaceMACs(domiflistOutput string) []string {
+	var macAddresses []string
+	for _, line := range strings.Split(domiflistOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		lastField := strings.ToLower(fields[len(fields)-1])
+		if _, err := net.ParseMAC(lastField); err == nil {
+			macAddresses = append(macAddresses, lastField)
+		}
+	}
+	return macAddresses
 }
 
 // State returns the current state of a VM (running, shut off, etc).

@@ -32,7 +32,7 @@ func newUpCmd() *cobra.Command {
 		Use:   "up [name...]",
 		Short: "Create and start VMs (all or named)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}

@@ -689,3 +689,47 @@ func TestGenerateFilesWithoutUIDLeavesDefault(t *testing.T) {
 		t.Errorf("expected no uid line when sshUserUID is 0, got:\n%s", userData)
 	}
 }
+
+func TestReadSavedMACAddressRoundTrip(t *testing.T) {
+	stateDir := t.TempDir()
+	seedDir := filepath.Join(stateDir, "ctrl")
+	if err := os.MkdirAll(seedDir, 0o700); err != nil {
+		t.Fatalf("creating seed dir: %v", err)
+	}
+	if err := writeNetworkConfig(seedDir, "192.168.122.10", "192.168.122.1", "192.168.122.1", "52:54:00:AB:cd:01"); err != nil {
+		t.Fatalf("writing network-config: %v", err)
+	}
+
+	macAddress, err := ReadSavedMACAddress(stateDir, "ctrl")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if macAddress != "52:54:00:ab:cd:01" {
+		t.Errorf("expected 52:54:00:ab:cd:01, got %q", macAddress)
+	}
+}
+
+func TestReadSavedMACAddressMissing(t *testing.T) {
+	macAddress, err := ReadSavedMACAddress(t.TempDir(), "ctrl")
+	if err != nil {
+		t.Fatalf("missing network-config should not be an error: %v", err)
+	}
+	if macAddress != "" {
+		t.Errorf("expected empty MAC, got %q", macAddress)
+	}
+}
+
+func TestReadSavedMACAddressCorrupt(t *testing.T) {
+	stateDir := t.TempDir()
+	seedDir := filepath.Join(stateDir, "ctrl")
+	if err := os.MkdirAll(seedDir, 0o700); err != nil {
+		t.Fatalf("creating seed dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(seedDir, "network-config"), []byte("ethernets: [unclosed"), 0o600); err != nil {
+		t.Fatalf("writing corrupt network-config: %v", err)
+	}
+
+	if _, err := ReadSavedMACAddress(stateDir, "ctrl"); err == nil {
+		t.Error("expected an error for corrupt network-config")
+	}
+}

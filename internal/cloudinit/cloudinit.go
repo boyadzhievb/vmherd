@@ -2,6 +2,7 @@ package cloudinit
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 // Files holds the paths to generated cloud-init configuration files.
@@ -187,6 +189,41 @@ ethernets:
 `, macAddress, ipAddress, gateway, dnsServer)
 
 	return os.WriteFile(filepath.Join(seedDir, "network-config"), []byte(content), 0o600)
+}
+
+// savedNetworkConfig is the part of a generated network-config that
+// ReadSavedMACAddress needs.
+type savedNetworkConfig struct {
+	Ethernets map[string]struct {
+		Match struct {
+			MACAddress string `yaml:"macaddress"` // MAC the VM was created with
+		} `yaml:"match"` // interface match rules
+	} `yaml:"ethernets"` // interfaces keyed by cloud-init id
+}
+
+// ReadSavedMACAddress returns the MAC address that GenerateFiles wrote for
+// vmName in stateDir. It returns "" and no error when no network-config exists,
+// meaning this project never created the VM.
+func ReadSavedMACAddress(stateDir, vmName string) (string, error) {
+	networkConfigPath := filepath.Join(stateDir, vmName, "network-config")
+	content, err := os.ReadFile(networkConfigPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", networkConfigPath, err)
+	}
+
+	var networkConfig savedNetworkConfig
+	if err := yaml.Unmarshal(content, &networkConfig); err != nil {
+		return "", fmt.Errorf("parsing %s: %w — delete it and run 'vmherd reload %s' to regenerate it", networkConfigPath, err, vmName)
+	}
+	for _, ethernet := range networkConfig.Ethernets {
+		if ethernet.Match.MACAddress != "" {
+			return strings.ToLower(ethernet.Match.MACAddress), nil
+		}
+	}
+	return "", nil
 }
 
 // writeMetaData generates the cloud-init meta-data file with instance identity.

@@ -16,8 +16,8 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
-| M0 | Unblock tooling, stop data loss and host compromise | 10 | 8 |
-| M1 | Correctness of existing features | 11 | 0 |
+| M0 | Unblock tooling, stop data loss and host compromise | 10 | 9 |
+| M1 | Correctness of existing features | 15 | 0 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -115,11 +115,13 @@ This is a remediation plan, separate from the product roadmap milestones.
     - **D.** See "Option D, in progress" above.
     - virtiofs notes for later (upstream guidance): keep `--sandbox namespace`; don't add `--modcaps=+sys_admin` (needed only for SELinux `trusted.` xattr remapping); `--translate-uid` can't be combined with `--posix-acl`; check whether Ubuntu 24.04's virtiofsd 1.10.0 has `--translate-uid`; libvirt `<idmap>` needs libvirt 10.0+.
 
-- [ ] **M0.8 — Make libvirt domain and disk names project-unique, and validate the project name** · High
+- [x] **M0.8 — Make libvirt domain and disk names project-unique, and validate the project name** · High
   - **Files:** `internal/config/project.go:103-110`, all callers of `DomainName`/`DiskPath`
   - **Problem:** Names use only `filepath.Base(dir)`, so `~/a/web` and `~/b/web` share domains and disks, and `destroy` in one wipes the other. The directory name isn't validated, so a comma injects options into `virt-install --disk path=...,format=qcow2`.
   - **Fix:** Use `vmherd-<project>-<shortHash>-<vm>` (the same hash as the state directory), and sanitize the project part to `[a-z0-9-]`. For migration, if the old-style domain exists and the new one doesn't, keep using the old name (record it in `state.json` once M2.1 lands).
   - **Done when:** A unit test shows two projects with the same basename get different domain names. A directory name containing a comma or space produces a valid name.
+  - **Result (2026-11-05):** Names are `vmherd-<project>-<hash8>-<vm>` (hash = state-dir hash; user chose the hash before the VM name). No `state.json` yet, so migration proves ownership by MAC: the old-style domain is used only if its MAC matches `<state>/<vm>/network-config`; another project's old domain is left alone with a note. `vmherd reload` moves a VM to the new name. Safe names alone weren't enough: the state dir, share host path and console-log path also reach `virt-install` and split at commas. All virt-install paths are now double-quoted (virt-install 4.1.0 does not accept `,,`); paths with `"` or line breaks are refused before any disk is created, because virt-install double-escapes `"` in the XML. Verified on .49: old-binary VM found by `status`/`ssh`/`destroy`; same-basename project gets its own domain and its `destroy` leaves the other VM running; `reload` migrates; `We b,x` project boots with `/vagrant` share and console log; `q"x` is refused with no leftovers.
+  - **Found, not fixed (pre-existing):** `vmherd console-log` fails with "permission denied" because virtlogd writes `console.log` as `root:root 0600` (same with the old binary). The default network name `vmherd-<basename>` still collides between same-basename projects.
 
 - [ ] **M0.9 — Remove the committed binary** · Low
   - **Files:** `vmherd-linux-amd64`, `.gitignore`
@@ -204,6 +206,37 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Problem:** `strings.HasPrefix(cleanPath, projectDir)` accepts `../proj-evil/x` when the project is `/…/proj`. Symlinks aren't resolved.
   - **Fix:** Use `filepath.Rel` plus `EvalSymlinks`, and reject when the relative path starts with `..`.
   - **Done when:** A test covers the sibling-prefix case.
+
+
+### Phase 1D — Found while testing M0 on the testbed
+
+- [ ] **M1.12 — 🔬 `fedora:42` checksum lookup fails for the example URL** · Med
+  - **Files:** `internal/image/registry.go:106`, `internal/config/project.go:251` (`ExampleHerdfile`), `internal/image/download.go` (`discoverChecksumInfo`)
+  - **Problem:** `vmherd pull fedora:42` with the URL from the built-in registry and example Herdfile fails at the checksum step. Seen on testbed .49 during M0 testing.
+  - **Verify:** Run `vmherd pull fedora:42` and check which checksum files the directory listing yields (Fedora publishes a signed `*-CHECKSUM` file, and `download.fedoraproject.org` redirects to mirrors).
+  - **Fix:** Depends on the repro: point `ChecksumURL` at Fedora's `CHECKSUM` file, or make discovery handle the redirect and Fedora's BSD-style `SHA256 (file) = hash` lines.
+  - **Done when:** `vmherd pull fedora:42` downloads and verifies the image on the testbed.
+
+- [ ] **M1.13 — Checksum discovery error ends in `: <nil>`** · Low
+  - **Files:** `internal/image/download.go:104-105`
+  - **Problem:** When the directory listing parses but has no checksum links (seen with `arch:latest`), the error is built with `%v` of a nil `scrapeError`, so the user sees `no checksum file found in directory listing at …: <nil>` and no hint.
+  - **Fix:** Separate the two cases: wrap `scrapeError` with `%w` when it is set; otherwise say no checksum links were found and suggest setting the image's checksum URL. Then check why the Arch listing yields no links (Arch publishes `*.qcow2.SHA256` next to the image).
+  - **Done when:** A unit test covers both messages, and `vmherd pull arch:latest` either verifies or fails with an actionable message.
+
+- [ ] **M1.14 — 🔬 `rocky:9` and `almalinux:9` VMs never reach SSH** · Med
+  - **Files:** `internal/cloudinit/cloudinit.go` (network-config, user-data), `internal/image/registry.go:81-82`
+  - **Problem:** Both images boot but `vmherd up` times out waiting for SSH. Seen on testbed .49. Likely the EL network stack (NetworkManager) ignores the netplan-style `match: macaddress` config, or the SSH user isn't created.
+  - **Verify:** Create a VM with `console_log: true` (after M1.15) and read the serial log for cloud-init network and user errors.
+  - **Fix:** Depends on the repro.
+  - **Done when:** `vmherd up` with `rocky:9` and with `almalinux:9` reaches SSH on the testbed.
+
+- [ ] **M1.15 — `vmherd console-log` fails with "permission denied"** · Med
+  - **Files:** `cmd/vmherd/console_log.go`, `internal/vm/vm.go` (`--serial file,path=…`)
+  - **Problem:** virtlogd writes `<state>/<vm>/console.log` as `root:root 0600`, so the host user can't read it. Same with the pre-M0.8 binary (verified on .49, 2026-11-05).
+  - **Fix:** Options: read the log via `sudo cat` (consistent with the other `sudo virsh` calls), or have libvirt write a log the user can read. Pick the one that doesn't loosen permissions on other files.
+  - **Done when:** `vmherd console-log <vm>` prints the log on the testbed for a VM with `console_log: true`.
+
+Note: the default network name `vmherd-<basename>` collides between projects with the same directory name, like domain names did before M0.8. Handle it with M1.2, which already changes how the default network and subnet are chosen.
 
 ---
 

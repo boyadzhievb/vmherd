@@ -233,7 +233,7 @@ All images are downloaded directly from official distro vendors and verified wit
 |------|-------|
 | Cloud images | `~/.vmherd/images/` |
 | SSH keys, cloud-init files | `.vmherd/` in project directory |
-| VM disks | `/var/lib/libvirt/images/vmherd-{project}-{name}.qcow2` |
+| VM disks | `/var/lib/libvirt/images/vmherd-{project}-{hash}-{name}.qcow2` |
 | Networks | libvirt networks prefixed `vmherd-` |
 
 ## License

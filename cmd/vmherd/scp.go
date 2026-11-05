@@ -22,7 +22,7 @@ Examples:
   vmherd scp ctrl:/var/log/syslog ./syslog.txt`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}

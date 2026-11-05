@@ -10,12 +10,26 @@ import (
 	"strings"
 )
 
+const (
+	// pathHashBytes is how many SHA-256 bytes of the project path are kept (hex doubles it).
+	pathHashBytes = 8
+	// domainHashLength is how many hex characters of the path hash go into libvirt names.
+	domainHashLength = 8
+	// maxProjectNamePartLength caps the project part of libvirt domain and disk names.
+	maxProjectNamePartLength = 32
+	// fallbackProjectNamePart replaces a project name with no usable characters.
+	fallbackProjectNamePart = "project"
+)
+
 // Project ties together the Herdfile with project-level paths and metadata.
 type Project struct {
-	Dir      string
-	Name     string
-	Herdfile *Herdfile
-	StateDir string
+	Dir      string    // absolute project directory (where the Herdfile lives)
+	Name     string    // project directory basename, as typed by the user
+	PathHash string    // hex SHA-256 prefix of Dir; keeps libvirt names unique per project
+	Herdfile *Herdfile // parsed and validated Herdfile
+	StateDir string    // persistent state directory for this project
+
+	legacyDomainVMs map[string]bool // VMs that still use the pre-M0.8 domain name
 }
 
 // LoadProject loads the Herdfile from the current directory and returns a Project.
@@ -35,9 +49,15 @@ func LoadProject() (*Project, error) {
 		return nil, fmt.Errorf("cannot resolve state directory: %w", err)
 	}
 
+	pathHash, err := projectPathHash(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot hash project directory %s: %w", dir, err)
+	}
+
 	return &Project{
 		Dir:      dir,
 		Name:     filepath.Base(dir),
+		PathHash: pathHash,
 		Herdfile: herdfile,
 		StateDir: stateDir,
 	}, nil
@@ -79,14 +99,11 @@ func resolveStateDir(projectDir string, vmNames []string) (string, error) {
 // collisions between projects with the same directory name. Falls back to
 // ~/.local/state/vmherd/ when XDG_STATE_HOME is unset.
 func globalStateDir(projectDir string) (string, error) {
-	absPath, err := filepath.Abs(projectDir)
+	pathHash, err := projectPathHash(projectDir)
 	if err != nil {
 		return "", err
 	}
-
-	pathHash := sha256.Sum256([]byte(absPath))
-	shortHash := hex.EncodeToString(pathHash[:8])
-	dirName := filepath.Base(projectDir) + "-" + shortHash
+	dirName := filepath.Base(projectDir) + "-" + pathHash
 
 	stateHome := os.Getenv("XDG_STATE_HOME")
 	if stateHome == "" {
@@ -100,9 +117,78 @@ func globalStateDir(projectDir string) (string, error) {
 	return filepath.Join(stateHome, "vmherd", dirName), nil
 }
 
-// DomainName returns the libvirt domain name for a VM in this project.
+// projectPathHash returns the hex SHA-256 prefix of the absolute project path.
+// The state directory and libvirt names both use it, so two projects with the
+// same directory name never share state, domains or disks.
+func projectPathHash(projectDir string) (string, error) {
+	absPath, err := filepath.Abs(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving absolute path of %s: %w", projectDir, err)
+	}
+	pathHash := sha256.Sum256([]byte(absPath))
+	return hex.EncodeToString(pathHash[:pathHashBytes]), nil
+}
+
+// DomainName returns the libvirt domain name for a VM in this project:
+// vmherd-<project>-<hash>-<vm>, or the pre-M0.8 name for VMs created under it.
 func (p *Project) DomainName(vmName string) string {
+	if p.legacyDomainVMs[vmName] {
+		return p.LegacyDomainName(vmName)
+	}
+	domainHash := p.PathHash
+	if len(domainHash) > domainHashLength {
+		domainHash = domainHash[:domainHashLength]
+	}
+	return fmt.Sprintf("vmherd-%s-%s-%s", sanitizeProjectName(p.Name), domainHash, vmName)
+}
+
+// LegacyDomainName returns the pre-M0.8 domain name (vmherd-<basename>-<vm>).
+// It is not unique across projects; use it only for VMs this project created.
+func (p *Project) LegacyDomainName(vmName string) string {
 	return fmt.Sprintf("vmherd-%s-%s", p.Name, vmName)
+}
+
+// UseLegacyDomainName makes DomainName and DiskPath return the pre-M0.8 names
+// for vmName. Call it only after proving the old domain belongs to this project.
+func (p *Project) UseLegacyDomainName(vmName string) {
+	if p.legacyDomainVMs == nil {
+		p.legacyDomainVMs = make(map[string]bool)
+	}
+	p.legacyDomainVMs[vmName] = true
+}
+
+// DropLegacyDomainName switches vmName back to the project-unique name, for
+// example after reload destroyed the old domain and recreates it.
+func (p *Project) DropLegacyDomainName(vmName string) {
+	delete(p.legacyDomainVMs, vmName)
+}
+
+// sanitizeProjectName maps a directory name to [a-z0-9-] for libvirt names:
+// lowercase, other characters become '-', runs of '-' collapse, ends are
+// trimmed and the result is capped. An empty result becomes "project".
+func sanitizeProjectName(projectName string) string {
+	var builder strings.Builder
+	lastWasDash := false
+	for _, character := range strings.ToLower(projectName) {
+		isAllowed := (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')
+		if isAllowed {
+			builder.WriteRune(character)
+			lastWasDash = false
+			continue
+		}
+		if !lastWasDash {
+			builder.WriteByte('-')
+			lastWasDash = true
+		}
+	}
+	sanitized := strings.Trim(builder.String(), "-")
+	if len(sanitized) > maxProjectNamePartLength {
+		sanitized = strings.TrimRight(sanitized[:maxProjectNamePartLength], "-")
+	}
+	if sanitized == "" {
+		return fallbackProjectNamePart
+	}
+	return sanitized
 }
 
 // DiskPath returns the qcow2 disk path for a VM.

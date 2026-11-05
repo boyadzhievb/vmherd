@@ -17,7 +17,7 @@ func newDownCmd() *cobra.Command {
 		Use:   "down [name...]",
 		Short: "Stop VMs gracefully (all or named)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}

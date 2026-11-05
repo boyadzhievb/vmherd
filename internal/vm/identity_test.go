@@ -70,8 +70,8 @@ func TestGuestUserUID(t *testing.T) {
 }
 
 func TestSharedFolderArgs(t *testing.T) {
-	if args := sharedFolderArgs(nil, "+1001:+106"); args != nil {
-		t.Errorf("expected no args without shared folders, got %v", args)
+	if args, err := sharedFolderArgs(nil, "+1001:+106"); args != nil || err != nil {
+		t.Errorf("expected no args and no error without shared folders, got %v, %v", args, err)
 	}
 	sharedFolders := []SharedFolderMount{
 		{HostPath: "/home/bob/proj", GuestPath: "/vagrant", MountTag: "vmherd_share_0"},
@@ -79,11 +79,22 @@ func TestSharedFolderArgs(t *testing.T) {
 	}
 	wantArgs := []string{
 		"--seclabel", "type=static,model=dac,label=+1001:+106,relabel=yes",
-		"--filesystem", "source.dir=/home/bob/proj,target.dir=vmherd_share_0,accessmode=squash",
-		"--filesystem", "source.dir=/home/bob/data,target.dir=vmherd_share_1,accessmode=squash",
+		"--filesystem", `source.dir="/home/bob/proj",target.dir=vmherd_share_0,accessmode=squash`,
+		"--filesystem", `source.dir="/home/bob/data",target.dir=vmherd_share_1,accessmode=squash`,
 	}
-	if gotArgs := sharedFolderArgs(sharedFolders, "+1001:+106"); !slices.Equal(gotArgs, wantArgs) {
+	gotArgs, err := sharedFolderArgs(sharedFolders, "+1001:+106")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !slices.Equal(gotArgs, wantArgs) {
 		t.Errorf("sharedFolderArgs() =\n  %v\nwant\n  %v", gotArgs, wantArgs)
+	}
+}
+
+func TestSharedFolderArgsRefusesQuote(t *testing.T) {
+	sharedFolders := []SharedFolderMount{{HostPath: `/home/bob/a"b`, GuestPath: "/vagrant", MountTag: "vmherd_share_0"}}
+	if _, err := sharedFolderArgs(sharedFolders, "+1001:+106"); err == nil || !strings.Contains(err.Error(), "/vagrant") {
+		t.Errorf("expected an error naming the share, got %v", err)
 	}
 }
 

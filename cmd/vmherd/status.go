@@ -18,7 +18,7 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show the state of all VMs defined in the Herdfile",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}

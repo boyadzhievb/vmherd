@@ -31,7 +31,7 @@ Examples:
   vmherd reload
   vmherd reload ctrl worker-1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}
@@ -85,6 +85,10 @@ Examples:
 				if err := shutdownAndDestroy(domainName, vmConfig.Name); err != nil {
 					return err
 				}
+
+				// The old domain is gone, so recreate under the project-unique name.
+				project.DropLegacyDomainName(vmConfig.Name)
+				domainName = project.DomainName(vmConfig.Name)
 
 				if err := createVM(project, vmConfig, domainName, pubKey, subnetBase, dnsServer); err != nil {
 					return err

@@ -18,7 +18,7 @@ func newSSHCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vmName := args[0]
 
-			project, err := config.LoadProject()
+			project, err := loadProjectWithDomains()
 			if err != nil {
 				return err
 			}
