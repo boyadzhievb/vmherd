@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
@@ -10,8 +9,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
-
-const restartShutdownWait = 5 * time.Second
 
 // newRestartCmd creates the 'restart' command that stops and starts VMs.
 func newRestartCmd() *cobra.Command {
@@ -58,8 +55,8 @@ Examples:
 	}
 }
 
-// stopAndStartVMs gracefully stops running VMs, waits, force-stops any
-// stragglers, then starts all VMs. Returns the list of VMs that were started.
+// stopAndStartVMs gracefully stops running VMs (in parallel, forcing only
+// after the shutdown timeout), then starts all VMs. Returns the started VMs.
 func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, error) {
 	var runningVMs []config.VM
 	var stoppedVMs []config.VM
@@ -78,27 +75,8 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 		}
 	}
 
-	for _, vmConfig := range runningVMs {
-		domainName := project.DomainName(vmConfig.Name)
-		ui.Printf("Stopping %s...\n", vmConfig.Name)
-		stopPortForwarding(project, vmConfig)
-		if err := vm.Shutdown(domainName); err != nil {
-			ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
-		}
-	}
-
-	if len(runningVMs) > 0 {
-		time.Sleep(restartShutdownWait)
-
-		for _, vmConfig := range runningVMs {
-			domainName := project.DomainName(vmConfig.Name)
-			if vm.State(domainName) == vm.StateRunning {
-				ui.Printf("Force-stopping %s...\n", vmConfig.Name)
-				if err := vm.ForceStop(domainName); err != nil {
-					return nil, fmt.Errorf("cannot force-stop %s: %w", vmConfig.Name, err)
-				}
-			}
-		}
+	if err := stopVMsGracefully(project, runningVMs); err != nil {
+		return nil, fmt.Errorf("cannot restart: %w", err)
 	}
 
 	allVMs := append(runningVMs, stoppedVMs...)

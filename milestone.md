@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 17 | 4 |
+| M1 | Correctness of existing features | 17 | 5 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -179,11 +179,12 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 1B — Lifecycle reliability
 
-- [ ] **M1.5 — Graceful stop by polling, not a fixed 5-second sleep** · Med
+- [x] **M1.5 — Graceful stop by polling, not a fixed 5-second sleep** · Med
   - **Files:** `cmd/vmherd/down.go:49`, `restart.go:96`, `reload.go:129`
   - **Problem:** All three sleep 5 seconds and then force-stop, which can lose data. The logic is copied three times with three identical constants.
   - **Fix:** Add one helper in `internal/vm`, `StopGracefully(domain string, timeout time.Duration) error`, that polls state with backoff and force-stops after a named `gracefulShutdownTimeout` (for example 60s). Use it in all three commands.
   - **Done when:** The three `time.Sleep` calls and duplicate constants are gone.
+  - **Result (2026-11-05):** `vm.StopGracefully` sends the ACPI shutdown, polls the state with backoff (1s, 2s, then 4s; `in shutdown` counts as still on) and forces the VM off only after `vm.GracefulShutdownTimeout` = 60s (Vagrant's `graceful_halt_timeout`), or at once if the shutdown request itself fails, and says when it had to. `down` and `restart` stop VMs in parallel through one helper; `reload` uses `StopGracefully` per VM. The three sleeps and constants are gone. Verified on .49: `down` of two VMs returned in 7s (the old code force-killed them at 5s, mid-shutdown); with one guest set to `HandlePowerKey=ignore`, the other stopped normally and the stubborn one was forced off at 60s with a message (61s total, not 120); `restart` 28s and `reload` 47s, both clean.
 
 - [ ] **M1.6 — `State()` reports errors and maps every libvirt state** · Med
   - **Files:** `internal/vm/vm.go:13-23,130-166`

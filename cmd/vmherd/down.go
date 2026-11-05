@@ -1,15 +1,11 @@
 package main
 
 import (
-	"time"
-
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
-
-const gracefulShutdownWait = 5 * time.Second
 
 // newDownCmd creates the 'down' command that gracefully stops VMs.
 func newDownCmd() *cobra.Command {
@@ -27,38 +23,19 @@ func newDownCmd() *cobra.Command {
 				return err
 			}
 
-			shutdownSent := false
+			var runningVMs []config.VM
 			for _, vmConfig := range vms {
-				domainName := project.DomainName(vmConfig.Name)
-				state := vm.State(domainName)
-
+				state := vm.State(project.DomainName(vmConfig.Name))
 				if state != vm.StateRunning {
 					ui.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
 					continue
 				}
-
-				shutdownSent = true
-				ui.Printf("Stopping %s...\n", vmConfig.Name)
-				stopPortForwarding(project, vmConfig)
-				if err := vm.Shutdown(domainName); err != nil {
-					ui.Printf("Warning: graceful shutdown failed for %s: %v\n", vmConfig.Name, err)
-				}
+				runningVMs = append(runningVMs, vmConfig)
 			}
 
-			if shutdownSent {
-				time.Sleep(gracefulShutdownWait)
-
-				for _, vmConfig := range vms {
-					domainName := project.DomainName(vmConfig.Name)
-					if vm.State(domainName) == vm.StateRunning {
-						ui.Printf("Force-stopping %s...\n", vmConfig.Name)
-						if err := vm.ForceStop(domainName); err != nil {
-							ui.Printf("Warning: force-stop failed for %s: %v\n", vmConfig.Name, err)
-						}
-					}
-				}
+			if err := stopVMsGracefully(project, runningVMs); err != nil {
+				return err
 			}
-
 			ui.Println("All VMs stopped.")
 			return nil
 		},

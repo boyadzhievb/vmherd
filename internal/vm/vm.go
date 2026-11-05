@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/libvirt"
 	"github.com/boyadzhievb/vmherd/internal/ui"
@@ -21,6 +22,18 @@ const (
 	StateStopped VMState = "shut off"
 	// StateNotCreated indicates the VM does not exist in libvirt.
 	StateNotCreated VMState = "not created"
+	// StateShuttingDown indicates the guest is handling a shutdown request.
+	StateShuttingDown VMState = "in shutdown"
+)
+
+const (
+	// GracefulShutdownTimeout is how long StopGracefully waits for the guest
+	// to power off before forcing it off (Vagrant's graceful_halt_timeout).
+	GracefulShutdownTimeout = 60 * time.Second
+	// shutdownInitialPollInterval is the first wait between state checks while stopping.
+	shutdownInitialPollInterval = 1 * time.Second
+	// shutdownMaxPollInterval caps the backoff between state checks while stopping.
+	shutdownMaxPollInterval = 4 * time.Second
 )
 
 // GenerateMACAddress creates a random MAC address with the QEMU OUI prefix (52:54:00).
@@ -191,6 +204,47 @@ func Start(domainName string) error {
 func Shutdown(domainName string) error {
 	if err := libvirt.Virsh("shutdown", domainName); err != nil {
 		return fmt.Errorf("cannot shut down VM %s: %w", domainName, err)
+	}
+	return nil
+}
+
+// StopGracefully asks the guest to shut down (ACPI) and waits up to timeout
+// for it to power off, checking with backoff. It forces the VM off if the
+// request fails or the timeout passes, and reports whether it had to.
+func StopGracefully(domainName string, timeout time.Duration) (bool, error) {
+	if err := Shutdown(domainName); err != nil {
+		ui.Printf("Warning: %v — forcing it off\n", err)
+		return true, forceStopIfRunning(domainName)
+	}
+
+	deadline := time.Now().Add(timeout)
+	pollInterval := shutdownInitialPollInterval
+	for time.Now().Before(deadline) {
+		if !isPoweredOn(State(domainName)) {
+			return false, nil
+		}
+		time.Sleep(min(pollInterval, time.Until(deadline)))
+		pollInterval = min(pollInterval*2, shutdownMaxPollInterval)
+	}
+	if !isPoweredOn(State(domainName)) {
+		return false, nil
+	}
+	return true, forceStopIfRunning(domainName)
+}
+
+// isPoweredOn reports whether a domain in state still has a running guest,
+// including one that is busy shutting down.
+func isPoweredOn(state VMState) bool {
+	return state == StateRunning || state == StateShuttingDown
+}
+
+// forceStopIfRunning powers the domain off unless it already stopped by itself.
+func forceStopIfRunning(domainName string) error {
+	if !isPoweredOn(State(domainName)) {
+		return nil
+	}
+	if err := ForceStop(domainName); err != nil {
+		return fmt.Errorf("cannot force-stop VM %s: %w", domainName, err)
 	}
 	return nil
 }

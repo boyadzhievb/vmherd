@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
 	"github.com/boyadzhievb/vmherd/internal/config"
@@ -15,8 +14,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
-
-const reloadShutdownWait = 5 * time.Second
 
 // newReloadCmd creates the 'reload' command that destroys and recreates VMs.
 func newReloadCmd() *cobra.Command {
@@ -110,25 +107,22 @@ Examples:
 	}
 }
 
-// shutdownAndDestroy gracefully stops a VM, waits, then force-stops and destroys it.
+// shutdownAndDestroy gracefully stops a VM (forcing only after the shutdown
+// timeout) and destroys it.
 func shutdownAndDestroy(domainName, vmName string) error {
 	if !vm.Exists(domainName) {
 		ui.Printf("%s does not exist, will create fresh.\n", vmName)
 		return nil
 	}
 
-	currentState := vm.State(domainName)
-	if currentState == vm.StateRunning {
+	if vm.State(domainName) == vm.StateRunning {
 		ui.Printf("Stopping %s...\n", vmName)
-		if err := vm.Shutdown(domainName); err != nil {
-			ui.Printf("Graceful shutdown failed for %s, force-stopping...\n", vmName)
+		forcedOff, err := vm.StopGracefully(domainName, vm.GracefulShutdownTimeout)
+		if err != nil {
+			return fmt.Errorf("cannot stop %s before reload: %w", vmName, err)
 		}
-		time.Sleep(reloadShutdownWait)
-
-		if vm.State(domainName) == vm.StateRunning {
-			if err := vm.ForceStop(domainName); err != nil {
-				return fmt.Errorf("cannot force-stop %s before reload: %w", vmName, err)
-			}
+		if forcedOff {
+			ui.Printf("%s did not shut down within %s and was forced off.\n", vmName, vm.GracefulShutdownTimeout)
 		}
 	}
 
