@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 15 | 1 |
+| M1 | Correctness of existing features | 16 | 1 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -143,7 +143,7 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Done when:** A unit test checks the argv built for a multi-line inline script, and on the testbed `vmherd provision` runs `apt-get update && apt-get install -y curl` successfully.
   - **Result (2026-11-05):** Shell steps run as `sudo bash -c '<script>'` with the script single-quoted (not on stdin, so commands in the script can't consume it). `ssh --` with one argument passes it as a shell command line (`'ls | wc -l'` keeps working); with several, each is single-quoted. The separate chmod call is gone (see below). The scp path is **not** quoted: OpenSSH 9+ scp uses SFTP, which takes the path literally, so quotes would end up in the filename. Unit tests include running the generated command line through a real shell. Verified on .49: with curl removed, `vmherd provision` reinstalls it via `apt-get update && apt-get install -y curl`, runs as root, and copies to `/tmp/a b.txt` and `/tmp/it's.txt`; `ssh -- printf "[%s]\n" "a b"` keeps the argument. The previous binary ran only `apt-get` and the rest as the SSH user.
   - **Also fixed here (user decision):** file steps failed with "Permission denied" right after `up`, because first boot had already written the files as root via `write_files` and scp copied as the SSH user (root-owned destinations like `/etc` failed too). File steps now scp to a random hidden name in the SSH user's home, then `sudo install -D -m 0644` moves it into place as `root:root` (same as `write_files`) and the upload is always removed. Verified on .49: provision right after first boot replaces `/tmp/a b.txt`, `/tmp/it's.txt` and `/etc/m11/app.conf`, all `root:root 0644`, no upload left behind. The install-command tests need GNU `install` (skip on macOS) and passed on the testbed.
-  - **Found, not fixed:** (1) A shell step reports "done" when an earlier command in the script failed, because the exit status is only the last command's. (2) Running provision while first-boot cloud-init is still running hits the apt lock — covered by M1.8.
+  - **Found, not fixed:** (1) A shell step reports "done" when an earlier command in the script failed, because the exit status is only the last command's — now M1.16. (2) Running provision while first-boot cloud-init is still running hits the apt lock — covered by M1.8.
 
 - [ ] **M1.2 — 🔬 Default subnet collides with libvirt's `default` network** · High
   - **Files:** `internal/config/parse.go:82`, `internal/config/project.go` (`ExampleHerdfile`), README, CLAUDE.md
@@ -239,6 +239,13 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Problem:** virtlogd writes `<state>/<vm>/console.log` as `root:root 0600`, so the host user can't read it. Same with the pre-M0.8 binary (verified on .49, 2026-11-05).
   - **Fix:** Options: read the log via `sudo cat` (consistent with the other `sudo virsh` calls), or have libvirt write a log the user can read. Pick the one that doesn't loosen permissions on other files.
   - **Done when:** `vmherd console-log <vm>` prints the log on the testbed for a VM with `console_log: true`.
+
+- [ ] **M1.16 — 🧭 A shell step reports success when an earlier command failed** · Med
+  - **Files:** `internal/ssh/connect.go` (`rootScriptCommandLine`), `internal/cloudinit/cloudinit.go` (`writeRuncmdEntries`), README (provisioning section)
+  - **Problem:** Shell steps run as `bash -c '<script>'`, so the step's exit status is only the last command's. On the testbed (2026-11-05, during M1.1) a step whose `apt-get update` failed on the apt lock still printed "done" because a later command succeeded. First boot has the same behavior: `runcmd` runs each step as `/bin/bash -c <script>`.
+  - **Decision needed:** stop at the first failing command by default (`bash -e`, optionally `-o pipefail`), which matches what users expect from a provisioning step but can break scripts that rely on ignoring a failure; or keep plain bash semantics and document that scripts must `set -e` themselves (Vagrant's behavior).
+  - **Fix:** Apply the chosen mode to both `vmherd provision` and first-boot `runcmd`, so a script behaves the same on both paths, and document it.
+  - **Done when:** A unit test shows a script with a failing first command and a succeeding last command fails the step (or, with the documented option, succeeds), and on the testbed `vmherd provision` reports the step as failed with a non-zero exit code.
 
 Note: the default network name `vmherd-<basename>` collides between projects with the same directory name, like domain names did before M0.8. Handle it with M1.2, which already changes how the default network and subnet are chosen.
 
