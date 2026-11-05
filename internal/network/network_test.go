@@ -2,6 +2,8 @@ package network
 
 import (
 	"net"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -104,42 +106,89 @@ func TestIPAndMaskToCIDRNetworkAddress(t *testing.T) {
 	}
 }
 
-func TestTruncateBridgeNameShort(t *testing.T) {
-	name := truncateBridgeName("virbr0")
-	if name != "virbr0" {
-		t.Errorf("expected virbr0, got %s", name)
+func TestBridgeNameForNetworkShort(t *testing.T) {
+	for _, networkName := range []string{"virbr0", "vmherd-exactly", "vmherd-15-chars"} {
+		if bridgeName := bridgeNameForNetwork(networkName); bridgeName != networkName {
+			t.Errorf("bridgeNameForNetwork(%q) = %q, want the name unchanged", networkName, bridgeName)
+		}
 	}
 }
 
-func TestTruncateBridgeNameExact15(t *testing.T) {
-	name := truncateBridgeName("vmherd-exactly")
-	if name != "vmherd-exactly" || len(name) != 14 {
-		t.Errorf("expected vmherd-exactly (14 chars), got %s (%d chars)", name, len(name))
+func TestBridgeNameForNetworkLong(t *testing.T) {
+	bridgeName := bridgeNameForNetwork("vmherd-web-8d7c1111")
+	if len(bridgeName) != maxBridgeNameLength {
+		t.Errorf("bridge name %q has %d chars, want %d", bridgeName, len(bridgeName), maxBridgeNameLength)
+	}
+	if !strings.HasPrefix(bridgeName, "vmherd-") {
+		t.Errorf("bridge name %q should keep the vmherd- prefix", bridgeName)
+	}
+	if bridgeNameForNetwork("vmherd-web-8d7c1111") != bridgeName {
+		t.Error("bridge name is not deterministic")
 	}
 }
 
-func TestTruncateBridgeNameLong(t *testing.T) {
-	name := truncateBridgeName("vmherd-my-very-long-network-name")
-	if len(name) != maxBridgeNameLength {
-		t.Errorf("expected length %d, got %d", maxBridgeNameLength, len(name))
-	}
-	if name != "vmherd-my-very-" {
-		t.Errorf("expected vmherd-my-very-, got %s", name)
+func TestBridgeNameForNetworkSharedPrefixDoesNotCollide(t *testing.T) {
+	firstBridge := bridgeNameForNetwork("vmherd-web-8d7c1111")
+	secondBridge := bridgeNameForNetwork("vmherd-web-5f3b2c5e")
+	if firstBridge == secondBridge {
+		t.Errorf("networks with a shared 15-char prefix both got bridge %q", firstBridge)
 	}
 }
 
-func TestTruncateBridgeNameCollisionScenario(t *testing.T) {
-	nameA := truncateBridgeName("vmherd-projectA-longname")
-	nameB := truncateBridgeName("vmherd-projectA-othername")
-	if nameA != nameB {
-		t.Errorf("expected collision: both should truncate to same name, got %q and %q", nameA, nameB)
+func TestFirstFreeSubnet(t *testing.T) {
+	testCases := []struct {
+		usedCIDRs    []string // networks already in use
+		wantBase     string   // expected free subnet base
+		wantNoSubnet bool     // expect an error because the pool is full
+	}{
+		{nil, "192.168.150", false},
+		{[]string{"192.168.122.0/24", "192.168.100.49/24"}, "192.168.150", false},
+		{[]string{"192.168.150.0/24", "192.168.151.0/24"}, "192.168.152", false},
+		{[]string{"192.168.150.1/32"}, "192.168.151", false},
+		{[]string{"192.168.144.0/20"}, "192.168.160", false},
+		{[]string{"192.168.0.0/16"}, "", true},
+	}
+	for _, testCase := range testCases {
+		gotBase, err := firstFreeSubnet(testCase.usedCIDRs)
+		if testCase.wantNoSubnet {
+			if err == nil || !strings.Contains(err.Error(), "set 'subnet'") {
+				t.Errorf("firstFreeSubnet(%v): expected an actionable error, got %q, %v", testCase.usedCIDRs, gotBase, err)
+			}
+			continue
+		}
+		if err != nil || gotBase != testCase.wantBase {
+			t.Errorf("firstFreeSubnet(%v) = %q, %v; want %q", testCase.usedCIDRs, gotBase, err, testCase.wantBase)
+		}
 	}
 }
 
-func TestTruncateBridgeNameNoCollisionDifferentPrefix(t *testing.T) {
-	nameA := truncateBridgeName("vmherd-alpha-network")
-	nameB := truncateBridgeName("vmherd-beta-network")
-	if nameA == nameB {
-		t.Errorf("different prefixes should not collide, both got %q", nameA)
+func TestParseRouteTableCIDRs(t *testing.T) {
+	routeTable := `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+eth0	00000000	0164A8C0	0003	0	0	0	00000000	0	0	0
+eth0	0064A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0
+tun0	0096A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0
+docker0	000011AC	00000000	0001	0	0	0	0000FFFF	0	0	0
+`
+	gotCIDRs := parseRouteTableCIDRs(routeTable)
+	wantCIDRs := []string{"192.168.100.0/24", "192.168.150.0/24", "172.17.0.0/16"}
+	if !slices.Equal(gotCIDRs, wantCIDRs) {
+		t.Errorf("parseRouteTableCIDRs() = %v, want %v (default route skipped)", gotCIDRs, wantCIDRs)
+	}
+}
+
+func TestDomainUsesNetwork(t *testing.T) {
+	domiflistOutput := ` Interface   Type      Source           Model    MAC
+-----------------------------------------------------------------
+ vnet3       network   vmherd-default   virtio   52:54:00:ab:cd:01
+ vnet4       bridge    br0              virtio   52:54:00:ab:cd:02
+`
+	if !domainUsesNetwork(domiflistOutput, "vmherd-default") {
+		t.Error("expected the domain to use vmherd-default")
+	}
+	if domainUsesNetwork(domiflistOutput, "br0") {
+		t.Error("a bridge interface is not a libvirt network")
+	}
+	if domainUsesNetwork(domiflistOutput, "vmherd-other") {
+		t.Error("the domain does not use vmherd-other")
 	}
 }

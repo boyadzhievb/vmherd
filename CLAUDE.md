@@ -52,8 +52,8 @@ vms:
     memory: 4096                 # MB
     disk: 20G
     network:
-      ip: 192.168.122.10
-      gateway: 192.168.122.1
+      ip: 192.168.150.10
+      gateway: 192.168.150.1
     provision:
       - type: shell
         inline: |
@@ -68,11 +68,11 @@ vms:
     memory: 2048
     disk: 20G
     network:
-      ip: 192.168.122.20
+      ip: 192.168.150.20
 
 network:
-  name: vmherd-default
-  subnet: 192.168.122.0/24
+  name: vmherd-myproject-1a2b3c4d  # vmherd init: project-unique name
+  subnet: 192.168.150.0/24         # vmherd init: first free /24 in 192.168.150-249
   dns: auto                     # derive from host /etc/resolv.conf
 
 ssh:
@@ -126,7 +126,7 @@ Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM 
 - Image cache: `~/.vmherd/images/`
 - VM state per project: `$XDG_STATE_HOME/vmherd/<project>-<hash>/` (~/.local/state/vmherd/ by default). Override with `VMHERD_STATE_DIR` env var. Query path with `vmherd info ssh-key` or `vmherd info state-dir`.
 - Libvirt domains and disks: `vmherd-<project>-<hash>-<name>` (`/var/lib/libvirt/images/vmherd-<project>-<hash>-<name>.qcow2`). `<project>` is the directory name reduced to `[a-z0-9-]`; `<hash>` is the first 8 hex chars of the state-dir hash. VMs created before M0.8 keep their `vmherd-<project>-<name>` domain while its MAC matches this project's saved network-config; `vmherd reload` moves them to the new name.
-- Networks: libvirt networks prefixed `vmherd-`
+- Networks: libvirt networks prefixed `vmherd-`. `vmherd init` writes `vmherd-<project>-<hash>` (same prefix as the domains) and the first free /24 in 192.168.150.0–192.168.249.0 (skips libvirt networks, host interfaces and `/proc/net/route`). Omitted values default to `vmherd-<basename>` and 192.168.122.0/24. `destroy` keeps a network that other VMs are still attached to. Bridge names over 15 chars become a prefix plus a hash of the network name.
 
 ### Provisioning via cloud-init
 

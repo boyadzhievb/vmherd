@@ -1,16 +1,37 @@
 package network
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/libvirt"
 	"github.com/boyadzhievb/vmherd/internal/ui"
+)
+
+const (
+	// freeSubnetPoolFirstOctet is the third octet of the first 192.168.X.0/24 FindFreeSubnet tries.
+	freeSubnetPoolFirstOctet = 150
+	// freeSubnetPoolLastOctet is the third octet of the last 192.168.X.0/24 FindFreeSubnet tries.
+	freeSubnetPoolLastOctet = 249
+	// procRouteTablePath is the Linux kernel's IPv4 routing table.
+	procRouteTablePath = "/proc/net/route"
+	// routeTableDestinationColumn is the Destination column in /proc/net/route.
+	routeTableDestinationColumn = 1
+	// routeTableMaskColumn is the Mask column in /proc/net/route.
+	routeTableMaskColumn = 7
+	// domiflistTypeColumn is the Type column in 'virsh domiflist' output.
+	domiflistTypeColumn = 1
+	// domiflistSourceColumn is the Source column in 'virsh domiflist' output.
+	domiflistSourceColumn = 2
 )
 
 // networkXML represents the top-level <network> element from virsh net-dumpxml.
@@ -122,12 +143,168 @@ func checkSubnetConflict(networkName, subnetBase string) error {
 			continue
 		}
 		if subnetsOverlap(ourCIDR, existingCIDR) {
-			return fmt.Errorf("subnet %s overlaps with existing libvirt network %q (%s) — change 'subnet' in your Herdfile to avoid conflicts",
-				ourCIDR, existingName, existingCIDR)
+			return fmt.Errorf("subnet %s overlaps with existing libvirt network %q (%s) — change 'subnet' in your Herdfile and the VMs' ip addresses to match%s",
+				ourCIDR, existingName, existingCIDR, freeSubnetHint(existingSubnets))
 		}
 	}
 
 	return nil
+}
+
+// freeSubnetHint suggests a free subnet for the overlap error, or returns ""
+// when none can be found.
+func freeSubnetHint(libvirtSubnets map[string]string) string {
+	hostCIDRs, err := hostNetworkCIDRs()
+	if err != nil {
+		return ""
+	}
+	freeSubnetBase, err := firstFreeSubnet(append(hostCIDRs, mapValues(libvirtSubnets)...))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("; %s.0/24 is free", freeSubnetBase)
+}
+
+// FindFreeSubnet returns the base (e.g. "192.168.150") of the first /24 in
+// the vmherd pool that overlaps no libvirt network, host interface or host
+// route. 'vmherd init' writes it into new Herdfiles.
+func FindFreeSubnet() (string, error) {
+	libvirtSubnets, err := listNetworkSubnets()
+	if err != nil {
+		return "", fmt.Errorf("finding a free subnet: %w", err)
+	}
+	hostCIDRs, err := hostNetworkCIDRs()
+	if err != nil {
+		return "", fmt.Errorf("finding a free subnet: %w", err)
+	}
+	return firstFreeSubnet(append(hostCIDRs, mapValues(libvirtSubnets)...))
+}
+
+// firstFreeSubnet returns the base of the first pool /24 that overlaps none
+// of usedCIDRs.
+func firstFreeSubnet(usedCIDRs []string) (string, error) {
+	for thirdOctet := freeSubnetPoolFirstOctet; thirdOctet <= freeSubnetPoolLastOctet; thirdOctet++ {
+		candidateBase := fmt.Sprintf("192.168.%d", thirdOctet)
+		if !overlapsAny(candidateBase+".0/24", usedCIDRs) {
+			return candidateBase, nil
+		}
+	}
+	return "", fmt.Errorf("no free /24 between 192.168.%d.0 and 192.168.%d.0 — set 'subnet' in your Herdfile by hand",
+		freeSubnetPoolFirstOctet, freeSubnetPoolLastOctet)
+}
+
+// overlapsAny reports whether candidateCIDR overlaps any of usedCIDRs.
+func overlapsAny(candidateCIDR string, usedCIDRs []string) bool {
+	for _, usedCIDR := range usedCIDRs {
+		if subnetsOverlap(candidateCIDR, usedCIDR) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostNetworkCIDRs returns the IPv4 networks of the host's interfaces and
+// routes, so a free subnet doesn't clash with the LAN, a VPN or a container
+// bridge. The default route is skipped because it overlaps everything.
+func hostNetworkCIDRs() ([]string, error) {
+	interfaceAddresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, fmt.Errorf("listing host interface addresses: %w", err)
+	}
+	var hostCIDRs []string
+	for _, interfaceAddress := range interfaceAddresses {
+		if ipNetwork, isIPNetwork := interfaceAddress.(*net.IPNet); isIPNetwork && ipNetwork.IP.To4() != nil {
+			hostCIDRs = append(hostCIDRs, ipNetwork.String())
+		}
+	}
+
+	routeTable, err := os.ReadFile(procRouteTablePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return hostCIDRs, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", procRouteTablePath, err)
+	}
+	return append(hostCIDRs, parseRouteTableCIDRs(string(routeTable))...), nil
+}
+
+// parseRouteTableCIDRs extracts destination CIDRs from /proc/net/route, whose
+// Destination and Mask columns are little-endian hex. Default routes are skipped.
+func parseRouteTableCIDRs(routeTable string) []string {
+	var routeCIDRs []string
+	for _, line := range strings.Split(routeTable, "\n")[1:] {
+		fields := strings.Fields(line)
+		if len(fields) <= routeTableMaskColumn {
+			continue
+		}
+		destination, destinationErr := parseLittleEndianIPv4(fields[routeTableDestinationColumn])
+		mask, maskErr := parseLittleEndianIPv4(fields[routeTableMaskColumn])
+		if destinationErr != nil || maskErr != nil {
+			continue
+		}
+		prefixLength, _ := net.IPMask(mask).Size()
+		if prefixLength == 0 {
+			continue
+		}
+		routeCIDRs = append(routeCIDRs, fmt.Sprintf("%s/%d", destination, prefixLength))
+	}
+	return routeCIDRs
+}
+
+// parseLittleEndianIPv4 decodes an 8-digit little-endian hex IPv4 address
+// as written in /proc/net/route.
+func parseLittleEndianIPv4(hexAddress string) (net.IP, error) {
+	addressBytes, err := hex.DecodeString(hexAddress)
+	if err != nil || len(addressBytes) != net.IPv4len {
+		return nil, fmt.Errorf("invalid route table address %q", hexAddress)
+	}
+	return net.IPv4(addressBytes[3], addressBytes[2], addressBytes[1], addressBytes[0]).To4(), nil
+}
+
+// mapValues returns the values of a string map, in no particular order.
+func mapValues(stringMap map[string]string) []string {
+	values := make([]string, 0, len(stringMap))
+	for _, value := range stringMap {
+		values = append(values, value)
+	}
+	return values
+}
+
+// AttachedDomains returns the sorted names of libvirt domains (running or not)
+// with an interface on networkName.
+func AttachedDomains(networkName string) ([]string, error) {
+	domainList, err := exec.Command("sudo", "virsh", "list", "--all", "--name").Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing libvirt domains: %w — check that libvirtd is running", err)
+	}
+	var attachedDomains []string
+	for _, line := range strings.Split(string(domainList), "\n") {
+		domainName := strings.TrimSpace(line)
+		if domainName == "" {
+			continue
+		}
+		interfaceList, err := exec.Command("sudo", "virsh", "domiflist", domainName).Output()
+		if err != nil {
+			return nil, fmt.Errorf("listing interfaces of domain %s: %w", domainName, err)
+		}
+		if domainUsesNetwork(string(interfaceList), networkName) {
+			attachedDomains = append(attachedDomains, domainName)
+		}
+	}
+	sort.Strings(attachedDomains)
+	return attachedDomains, nil
+}
+
+// domainUsesNetwork reports whether 'virsh domiflist' output has an interface
+// of type network whose source is networkName.
+func domainUsesNetwork(domiflistOutput, networkName string) bool {
+	for _, line := range strings.Split(domiflistOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= domiflistSourceColumn+1 && fields[domiflistTypeColumn] == "network" && fields[domiflistSourceColumn] == networkName {
+			return true
+		}
+	}
+	return false
 }
 
 // Ensure creates the libvirt network if it doesn't exist, starts it, and enables autostart.
@@ -148,7 +325,7 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 		return err
 	}
 
-	bridgeName := truncateBridgeName(networkName)
+	bridgeName := bridgeNameForNetwork(networkName)
 
 	if err := checkBridgeNameConflict(networkName, bridgeName); err != nil {
 		return err
@@ -240,12 +417,22 @@ func isActive(networkName string) bool {
 
 const maxBridgeNameLength = 15
 
-// truncateBridgeName ensures the bridge name fits within the Linux 15-char limit.
-func truncateBridgeName(networkName string) string {
+// bridgeNameHashLength is how many hex characters of the network-name hash end
+// a shortened bridge name.
+const bridgeNameHashLength = 8
+
+// bridgeNameForNetwork returns the Linux bridge name for a new libvirt network.
+// Names that fit the 15-char limit are used as is. Longer names become their
+// first characters plus a hash of the full name, so two long names that share
+// a prefix (vmherd-web-1a2b… and vmherd-web-9f8e…) still get different bridges.
+func bridgeNameForNetwork(networkName string) string {
 	if len(networkName) <= maxBridgeNameLength {
 		return networkName
 	}
-	return networkName[:maxBridgeNameLength]
+	nameHash := sha256.Sum256([]byte(networkName))
+	hashSuffix := hex.EncodeToString(nameHash[:])[:bridgeNameHashLength]
+	prefixLength := maxBridgeNameLength - bridgeNameHashLength - 1
+	return networkName[:prefixLength] + "-" + hashSuffix
 }
 
 // bridgeXML represents the <bridge> element inside a libvirt network definition.
@@ -260,8 +447,8 @@ type networkBridgeXML struct {
 }
 
 // checkBridgeNameConflict verifies that the bridge name we plan to use is not
-// already claimed by another libvirt network. Two long network names that share
-// the same first 15 characters would collide after truncation.
+// already claimed by another libvirt network, for example one created by an
+// older vmherd that truncated long names to 15 characters.
 func checkBridgeNameConflict(networkName, bridgeName string) error {
 	out, err := exec.Command("sudo", "virsh", "net-list", "--all", "--name").Output()
 	if err != nil {
@@ -286,7 +473,7 @@ func checkBridgeNameConflict(networkName, bridgeName string) error {
 
 		if netDef.Bridge.Name == bridgeName {
 			return fmt.Errorf("bridge name %q conflicts with existing libvirt network %q — "+
-				"both network names truncate to the same 15-char bridge. "+
+				"both networks would use the same 15-char bridge. "+
 				"Rename your network in the Herdfile (network.name) to avoid this collision",
 				bridgeName, existingNetworkName)
 		}

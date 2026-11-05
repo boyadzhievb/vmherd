@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 )
 
 const (
@@ -135,11 +136,7 @@ func (p *Project) DomainName(vmName string) string {
 	if p.legacyDomainVMs[vmName] {
 		return p.LegacyDomainName(vmName)
 	}
-	domainHash := p.PathHash
-	if len(domainHash) > domainHashLength {
-		domainHash = domainHash[:domainHashLength]
-	}
-	return fmt.Sprintf("vmherd-%s-%s-%s", sanitizeProjectName(p.Name), domainHash, vmName)
+	return libvirtNamePrefix(p.Name, p.PathHash) + "-" + vmName
 }
 
 // LegacyDomainName returns the pre-M0.8 domain name (vmherd-<basename>-<vm>).
@@ -239,10 +236,9 @@ func ImageCacheDir() string {
 	return filepath.Join(home, ".vmherd", "images")
 }
 
-// ExampleHerdfile returns a sample Herdfile for 'vmherd init'.
-func ExampleHerdfile() string {
-	return strings.TrimSpace(`
-# Herdfile — vmherd VM definitions
+// exampleHerdfileTemplate is the Herdfile 'vmherd init' writes. The network
+// name and subnet are filled in per project so projects don't share a network.
+var exampleHerdfileTemplate = template.Must(template.New("Herdfile").Parse(`# Herdfile — vmherd VM definitions
 # Docs: https://github.com/boyadzhievb/vmherd
 
 images:
@@ -257,7 +253,7 @@ vms:
     memory: 4096
     disk: 20G
     network:
-      ip: 192.168.122.10
+      ip: {{.SubnetBase}}.10
     shared_folders:
       - host: .
         guest: /vagrant
@@ -275,14 +271,49 @@ vms:
     memory: 2048
     disk: 20G
     network:
-      ip: 192.168.122.20
+      ip: {{.SubnetBase}}.20
 
 network:
-  name: vmherd-default
-  subnet: 192.168.122.0/24
+  name: {{.NetworkName}}
+  subnet: {{.SubnetBase}}.0/24
   dns: auto
 
 ssh:
   user: vmherd
-`) + "\n"
+`))
+
+// exampleHerdfileValues fills exampleHerdfileTemplate.
+type exampleHerdfileValues struct {
+	NetworkName string // project-unique libvirt network name
+	SubnetBase  string // first three octets of a free /24, e.g. "192.168.150"
+}
+
+// ExampleHerdfile returns a sample Herdfile for 'vmherd init' that uses
+// networkName and the /24 subnet starting at subnetBase.
+func ExampleHerdfile(networkName, subnetBase string) (string, error) {
+	var rendered strings.Builder
+	if err := exampleHerdfileTemplate.Execute(&rendered, exampleHerdfileValues{NetworkName: networkName, SubnetBase: subnetBase}); err != nil {
+		return "", fmt.Errorf("rendering example Herdfile: %w", err)
+	}
+	return strings.TrimSpace(rendered.String()) + "\n", nil
+}
+
+// DefaultNetworkName returns the project-unique libvirt network name that
+// 'vmherd init' writes: vmherd-<project>-<hash>, matching the VM domain names.
+func DefaultNetworkName(projectDir string) (string, error) {
+	pathHash, err := projectPathHash(projectDir)
+	if err != nil {
+		return "", err
+	}
+	return libvirtNamePrefix(filepath.Base(projectDir), pathHash), nil
+}
+
+// libvirtNamePrefix returns vmherd-<sanitized project>-<short hash>, the
+// project-unique start of vmherd's libvirt domain and network names.
+func libvirtNamePrefix(projectName, pathHash string) string {
+	shortHash := pathHash
+	if len(shortHash) > domainHashLength {
+		shortHash = shortHash[:domainHashLength]
+	}
+	return fmt.Sprintf("vmherd-%s-%s", sanitizeProjectName(projectName), shortHash)
 }

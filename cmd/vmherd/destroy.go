@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/network"
@@ -48,7 +49,7 @@ func newDestroyCmd() *cobra.Command {
 			}
 
 			if destroyAll {
-				if err := network.Destroy(project.Herdfile.Network.Name); err != nil {
+				if err := destroyNetworkUnlessShared(project.Herdfile.Network.Name); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
 				if err := config.RemoveProjectStateDir(project.StateDir, project.Herdfile.VMNames()); err != nil {
@@ -60,4 +61,20 @@ func newDestroyCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// destroyNetworkUnlessShared removes the project's libvirt network only when
+// no VM is attached any more. Another project's VMs on the same network would
+// lose connectivity, so in that case, or when the check fails, it is kept.
+func destroyNetworkUnlessShared(networkName string) error {
+	attachedDomains, err := network.AttachedDomains(networkName)
+	if err != nil {
+		return fmt.Errorf("keeping network %s: cannot check which VMs still use it: %w", networkName, err)
+	}
+	if len(attachedDomains) > 0 {
+		ui.Printf("Keeping network %s: still used by %s. Remove it with 'sudo virsh net-destroy %s && sudo virsh net-undefine %s' once they are gone.\n",
+			networkName, strings.Join(attachedDomains, ", "), networkName, networkName)
+		return nil
+	}
+	return network.Destroy(networkName)
 }

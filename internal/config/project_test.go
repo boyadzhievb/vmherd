@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -196,7 +198,10 @@ func TestGatewayIPInvalidCIDR(t *testing.T) {
 
 // TestExampleHerdfileIsValidYAML verifies that ExampleHerdfile produces parseable YAML with at least one VM.
 func TestExampleHerdfileIsValidYAML(t *testing.T) {
-	exampleContent := ExampleHerdfile()
+	exampleContent, err := ExampleHerdfile("vmherd-web-01234567", "192.168.151")
+	if err != nil {
+		t.Fatalf("rendering example: %v", err)
+	}
 
 	var herdfile Herdfile
 	if err := yaml.Unmarshal([]byte(exampleContent), &herdfile); err != nil {
@@ -205,5 +210,56 @@ func TestExampleHerdfileIsValidYAML(t *testing.T) {
 
 	if len(herdfile.VMs) == 0 {
 		t.Fatal("ExampleHerdfile must define at least one VM")
+	}
+	if herdfile.Network.Name != "vmherd-web-01234567" || herdfile.Network.Subnet != "192.168.151.0/24" {
+		t.Errorf("example network = %q %q, want vmherd-web-01234567 192.168.151.0/24", herdfile.Network.Name, herdfile.Network.Subnet)
+	}
+	for _, vmConfig := range herdfile.VMs {
+		if !strings.HasPrefix(vmConfig.Network.IP, "192.168.151.") {
+			t.Errorf("VM %s ip %s is outside the example subnet", vmConfig.Name, vmConfig.Network.IP)
+		}
+	}
+}
+
+func TestExampleHerdfilePassesValidation(t *testing.T) {
+	projectDir := t.TempDir()
+	networkName, err := DefaultNetworkName(projectDir)
+	if err != nil {
+		t.Fatalf("default network name: %v", err)
+	}
+	exampleContent, err := ExampleHerdfile(networkName, "192.168.151")
+	if err != nil {
+		t.Fatalf("rendering example: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, HerdfileName), []byte(exampleContent), 0o644); err != nil {
+		t.Fatalf("writing example: %v", err)
+	}
+	if _, err := Load(projectDir); err != nil {
+		t.Errorf("example Herdfile fails validation: %v", err)
+	}
+}
+
+func TestDefaultNetworkNameIsProjectUnique(t *testing.T) {
+	firstName, err := DefaultNetworkName("/home/user/a/web")
+	if err != nil {
+		t.Fatalf("first name: %v", err)
+	}
+	secondName, err := DefaultNetworkName("/home/user/b/web")
+	if err != nil {
+		t.Fatalf("second name: %v", err)
+	}
+	if firstName == secondName {
+		t.Errorf("projects in different directories share network name %s", firstName)
+	}
+	if !regexp.MustCompile(`^vmherd-web-[0-9a-f]{8}$`).MatchString(firstName) {
+		t.Errorf("network name %s is not vmherd-web-<hash8>", firstName)
+	}
+	firstHash, err := projectPathHash("/home/user/a/web")
+	if err != nil {
+		t.Fatalf("hashing: %v", err)
+	}
+	domainName := (&Project{Name: "web", PathHash: firstHash}).DomainName("ctrl")
+	if domainName != firstName+"-ctrl" {
+		t.Errorf("domain %s and network %s use different prefixes", domainName, firstName)
 	}
 }

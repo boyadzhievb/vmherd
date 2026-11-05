@@ -118,8 +118,8 @@ vms:
       ip: 192.168.122.20
 
 network:
-  name: vmherd-default
-  subnet: 192.168.122.0/24
+  name: vmherd-myproject-1a2b3c4d   # vmherd init picks a project-unique name
+  subnet: 192.168.150.0/24          # and a /24 no other network or route uses
   dns: auto
 
 ssh:
@@ -146,8 +146,8 @@ ssh:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `name` | vmherd-{dir} | libvirt network name |
-| `subnet` | 192.168.122.0/24 | Network subnet |
+| `name` | vmherd-{dir} | libvirt network name. `vmherd init` writes `vmherd-{dir}-{hash}` so projects never share a network. `vmherd destroy` keeps the network while VMs of another project are still attached |
+| `subnet` | 192.168.122.0/24 | Network subnet. The default is the same as libvirt's stock `default` network, so set it explicitly; `vmherd init` writes the first free /24 in 192.168.150.0–192.168.249.0, skipping libvirt networks and host interfaces and routes |
 | `dns` | auto | DNS server (`auto` reads from host /etc/resolv.conf) |
 
 ### SSH fields

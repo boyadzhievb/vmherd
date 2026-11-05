@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
+	"github.com/boyadzhievb/vmherd/internal/network"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +20,11 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("%s already exists in this directory", config.HerdfileName)
 			}
 
-			if err := os.WriteFile(config.HerdfileName, []byte(config.ExampleHerdfile()), 0o644); err != nil {
+			exampleContent, err := buildExampleHerdfile()
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(config.HerdfileName, []byte(exampleContent), 0o644); err != nil {
 				return fmt.Errorf("cannot write %s: %w", config.HerdfileName, err)
 			}
 
@@ -27,4 +32,31 @@ func newInitCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// fallbackExampleSubnetBase is used by 'vmherd init' when libvirt can't be
+// queried for a free subnet; init warns so the user can check it.
+const fallbackExampleSubnetBase = "192.168.150"
+
+// buildExampleHerdfile renders the example Herdfile with this project's own
+// network name and the first subnet no libvirt network or host route uses.
+func buildExampleHerdfile() (string, error) {
+	projectDir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine working directory: %w", err)
+	}
+	networkName, err := config.DefaultNetworkName(projectDir)
+	if err != nil {
+		return "", fmt.Errorf("choosing a network name for %s: %w", projectDir, err)
+	}
+
+	subnetBase, err := network.FindFreeSubnet()
+	if err != nil {
+		ui.Printf("Warning: %v; using %s.0/24 — check it doesn't clash with your networks ('virsh net-list --all', 'ip route')\n",
+			err, fallbackExampleSubnetBase)
+		subnetBase = fallbackExampleSubnetBase
+	}
+	ui.Printf("Using network %s with subnet %s.0/24\n", networkName, subnetBase)
+
+	return config.ExampleHerdfile(networkName, subnetBase)
 }

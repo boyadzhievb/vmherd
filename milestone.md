@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 16 | 1 |
+| M1 | Correctness of existing features | 16 | 2 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -145,12 +145,15 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Also fixed here (user decision):** file steps failed with "Permission denied" right after `up`, because first boot had already written the files as root via `write_files` and scp copied as the SSH user (root-owned destinations like `/etc` failed too). File steps now scp to a random hidden name in the SSH user's home, then `sudo install -D -m 0644` moves it into place as `root:root` (same as `write_files`) and the upload is always removed. Verified on .49: provision right after first boot replaces `/tmp/a b.txt`, `/tmp/it's.txt` and `/etc/m11/app.conf`, all `root:root 0644`, no upload left behind. The install-command tests need GNU `install` (skip on macOS) and passed on the testbed.
   - **Found, not fixed:** (1) A shell step reports "done" when an earlier command in the script failed, because the exit status is only the last command's — now M1.16. (2) Running provision while first-boot cloud-init is still running hits the apt lock — covered by M1.8.
 
-- [ ] **M1.2 — 🔬 Default subnet collides with libvirt's `default` network** · High
+- [x] **M1.2 — 🔬 Default subnet collides with libvirt's `default` network** · High
   - **Files:** `internal/config/parse.go:82`, `internal/config/project.go` (`ExampleHerdfile`), README, CLAUDE.md
   - **Problem:** The default and example subnet is `192.168.122.0/24`, which is the stock libvirt `default` network, so `checkSubnetConflict` should reject `vmherd init && vmherd up` on a stock host.
   - **Verify:** Run `vmherd init && vmherd up` on a host where `virsh net-list` shows `default`.
   - **Fix:** Pick a different default (for example `192.168.150.0/24`), or auto-select the first free /24 from a pool and record it in `state.json`.
   - **Done when:** `init` then `up` works on a stock libvirt host.
+  - **Repro (2026-11-05, .49):** three problems, all confirmed. (1) `init`'s subnet 192.168.122.0/24 fails `up` with an overlap error (on .49 `vmherd-terramino` holds it; on a stock host it's libvirt's `default`), and a fixed default means any second project clashes. (2) `init` always wrote `name: vmherd-default`, so every init'ed project reused one network, skipping the subnet check. (3) `destroy` removed that shared network while another project's VM was running on it; that VM lost SSH.
+  - **Result:** `init` writes `vmherd-<project>-<hash8>` (same prefix as the domains) and the first free /24 in 192.168.150–249, skipping libvirt networks, host interfaces and `/proc/net/route` (default route ignored), with VM IPs to match; if libvirt can't be queried it warns and uses 192.168.150. `destroy` keeps a network while any VM is attached and prints which, and keeps it if the check fails. The overlap error suggests a free subnet. Bridge names over 15 chars are a prefix plus a hash of the network name (truncation made `vmherd-web-…` names collide). User decision: a Herdfile without `subnet` keeps 192.168.122.0/24, so existing Herdfiles don't break; without `name` it keeps `vmherd-<basename>`. Verified on .49: two `init` projects get 150 and 151 with their own networks and boot; a third project on the first one's network is destroyed without removing it, and the first VM stays reachable; the overlap error names 192.168.150.0/24 as free.
+  - **Still open:** `init`'s example has a port forward, so `init && up` fails on hosts without iptables before reaching the network (seen on .49) — M1.3. Hand-written Herdfiles without `network.name` still share `vmherd-<basename>` across same-basename projects, but `destroy` no longer breaks the other project.
 
 - [ ] **M1.3 — 🔬 Port forwarding works and binds to localhost by default** · High
   - **Files:** `internal/portfwd/portfwd.go`
@@ -247,7 +250,7 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** Apply the chosen mode to both `vmherd provision` and first-boot `runcmd`, so a script behaves the same on both paths, and document it.
   - **Done when:** A unit test shows a script with a failing first command and a succeeding last command fails the step (or, with the documented option, succeeds), and on the testbed `vmherd provision` reports the step as failed with a non-zero exit code.
 
-Note: the default network name `vmherd-<basename>` collides between projects with the same directory name, like domain names did before M0.8. Handle it with M1.2, which already changes how the default network and subnet are chosen.
+Note: the default network name collision is handled under M1.2.
 
 ---
 
