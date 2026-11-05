@@ -4,6 +4,46 @@ All notable releases are documented here.
 
 ---
 
+## v0.2.0
+
+**2026-11-05** — Safety fixes, working port forwarding and provisioning, DHCP VMs
+
+This release fixes data-loss and host-safety problems and several features that did not work in v0.1.x. It has breaking changes; read **Upgrading** first.
+
+### Upgrading from v0.1.x
+- **Port forwards** now run over one SSH tunnel per VM instead of iptables, and listen on `127.0.0.1` by default. Set `host_ip: 0.0.0.0` (or a host address) on a port to expose it on the network. `protocol: udp` is refused (SSH carries TCP only). Host ports below 1024 use `sudo`. The iptables DNAT rules v0.1.x created for a VM's ports are removed automatically when v0.2.0 starts or stops that VM's port forwarding (only rules exactly in the v0.1.x format are touched); left in place they would catch the traffic before the tunnel.
+- **Shell provision steps run as root** (like first-boot `runcmd`); **file steps are installed as `root:root 0644`**.
+- **New libvirt names:** VMs and disks are `vmherd-<project>-<hash>-<vm>`. Existing VMs keep their old name and keep working; `vmherd reload` moves a VM to the new name.
+- **Shared folders:** for VMs with shares, QEMU runs as your user (9p `accessmode=squash`) and the guest SSH user gets your UID, so files have the same owner and modes on both sides. vmherd refuses to run as root. Existing VMs get this after `vmherd reload`.
+- **The default `/vagrant` share is announced** by `vmherd up`; `shared_folders: []` now means no shares.
+- **A VM without `network.ip` uses DHCP** (it used to boot with no network). `network.gateway` without `network.ip` is refused.
+- Project paths and share paths containing `"` or a line break are refused (virt-install can't carry them).
+
+### Fixed
+- `destroy` only removes a state directory that carries the vmherd marker, and only files vmherd created.
+- Shared-folder host paths must resolve inside the project or `$HOME` (`allow_outside_home: true` for others); `/`, `$HOME` and system directories are refused. The `chmod o+rwx` fallback is gone.
+- Guest-created files in shares are readable on the host; guest root can't create root-owned files there.
+- Projects with the same directory name no longer share VMs, disks or networks, and a comma in the directory name can't inject virt-install options.
+- `provision` runs multi-line shell scripts intact (`apt-get update && …` used to run only `apt-get`), and file steps work right after `up`.
+- `vmherd ssh <vm> -- cmd args` keeps quoted arguments.
+- A shared folder mounted under the SSH user's home (for example `/home/vagrant/app`) no longer leaves the home directory owned by root.
+- cloud-init no longer reports `status: error` on every VM with a shared folder (a second, redundant mount failed).
+- `vmherd init` writes a project-unique network name and a free subnet (192.168.150–249) instead of `vmherd-default` on libvirt's `192.168.122.0/24`; `destroy` keeps a network other VMs still use; the subnet-overlap error suggests a free subnet.
+- Port forwarding works: `localhost`, LAN (with `host_ip`), and the iptables-not-in-PATH failure on Debian is gone.
+- `down`, `restart` and `reload` wait up to 60s for a clean shutdown (in parallel) instead of forcing VMs off after 5s.
+- Integration tests no longer run fork-PR code on the self-hosted runner; the committed release binary is removed.
+
+### Known issues
+- Only Ubuntu and Debian images are tested end to end. `fedora:42` fails at the checksum step, the `arch:latest` checksum error is unclear, and `rocky:9` / `almalinux:9` never reach SSH.
+- `vmherd console-log` fails with "permission denied" (the log is written as root).
+- A shell provision step reports success if a later command in the script succeeds after an earlier one failed.
+- `provision` right after `up` can hit the apt lock while first-boot cloud-init is still running.
+- Files created in a shared folder get the group of `/dev/kvm` (usually `kvm`) on the host; owner and modes match.
+- `up` exits 0 when a VM's SSH wait or DHCP lease times out (it prints a warning).
+- Image checksums are fetched from the vendor's server but not yet GPG-verified, and release builds are not yet gated on tests.
+
+---
+
 ## v0.1.15
 
 **2026-10-27** — Redesing registry
