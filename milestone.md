@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 15 | 0 |
+| M1 | Correctness of existing features | 15 | 1 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -136,11 +136,14 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 1A — Broken features
 
-- [ ] **M1.1 — Fix command quoting for `provision`, `ssh --` and `scp`** · High
+- [x] **M1.1 — Fix command quoting for `provision`, `ssh --` and `scp`** · High
   - **Files:** `internal/ssh/connect.go:27`, `cmd/vmherd/provision.go:102,120,126`
   - **Problem:** `Connect` joins `["bash","-c",inline]` with spaces, so the remote shell re-splits it: `apt-get update && …` runs `bash -c apt-get`. Provision steps also run as the SSH user, while first-boot `runcmd` runs as root. `vmherd ssh vm -- ls "/a b"` loses quoting. The `chmod` destination is unquoted, and the comment says "sets it executable" while the code sets `0644`.
   - **Fix:** Run shell steps as `ssh … sudo bash -s` with the script on stdin. Quote user `ssh --` arguments for POSIX shells (`'…'` with escaped `'`). Quote the scp/chmod remote path. Make the comment match the permission (or make it configurable).
   - **Done when:** A unit test checks the argv built for a multi-line inline script, and on the testbed `vmherd provision` runs `apt-get update && apt-get install -y curl` successfully.
+  - **Result (2026-11-05):** Shell steps run as `sudo bash -c '<script>'` with the script single-quoted (not on stdin, so commands in the script can't consume it). `ssh --` with one argument passes it as a shell command line (`'ls | wc -l'` keeps working); with several, each is single-quoted. The separate chmod call is gone (see below). The scp path is **not** quoted: OpenSSH 9+ scp uses SFTP, which takes the path literally, so quotes would end up in the filename. Unit tests include running the generated command line through a real shell. Verified on .49: with curl removed, `vmherd provision` reinstalls it via `apt-get update && apt-get install -y curl`, runs as root, and copies to `/tmp/a b.txt` and `/tmp/it's.txt`; `ssh -- printf "[%s]\n" "a b"` keeps the argument. The previous binary ran only `apt-get` and the rest as the SSH user.
+  - **Also fixed here (user decision):** file steps failed with "Permission denied" right after `up`, because first boot had already written the files as root via `write_files` and scp copied as the SSH user (root-owned destinations like `/etc` failed too). File steps now scp to a random hidden name in the SSH user's home, then `sudo install -D -m 0644` moves it into place as `root:root` (same as `write_files`) and the upload is always removed. Verified on .49: provision right after first boot replaces `/tmp/a b.txt`, `/tmp/it's.txt` and `/etc/m11/app.conf`, all `root:root 0644`, no upload left behind. The install-command tests need GNU `install` (skip on macOS) and passed on the testbed.
+  - **Found, not fixed:** (1) A shell step reports "done" when an earlier command in the script failed, because the exit status is only the last command's. (2) Running provision while first-boot cloud-init is still running hits the apt lock — covered by M1.8.
 
 - [ ] **M1.2 — 🔬 Default subnet collides with libvirt's `default` network** · High
   - **Files:** `internal/config/parse.go:82`, `internal/config/project.go` (`ExampleHerdfile`), README, CLAUDE.md

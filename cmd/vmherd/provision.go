@@ -10,13 +10,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// provisionedFileMode is the mode set on files copied by 'type: file' steps.
+const provisionedFileMode = "0644"
+
 // newProvisionCmd creates the 'provision' command that reruns provisioning on running VMs.
 func newProvisionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "provision [name...]",
 		Short: "Rerun provisioning steps on running VMs (all or named)",
 		Long: `Run all provisioning steps defined in the Herdfile on running VMs via SSH.
-Shell steps are executed remotely. File steps are copied via scp.
+Shell steps run as root. File steps are copied via scp and installed as root
+with mode 0644, matching first boot.
 
 Examples:
   vmherd provision
@@ -90,7 +94,8 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 	return nil
 }
 
-// provisionShellStep runs an inline shell command on the VM via SSH.
+// provisionShellStep runs an inline shell script on the VM as root via SSH,
+// matching first-boot runcmd, which also runs as root.
 func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config.Provision, stepNumber, totalSteps int) error {
 	if step.Inline == "" {
 		ui.Printf("  step %d/%d: shell (empty, skipping)\n", stepNumber, totalSteps)
@@ -99,8 +104,7 @@ func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config
 
 	ui.Printf("  step %d/%d: shell...", stepNumber, totalSteps)
 
-	command := []string{"bash", "-c", step.Inline}
-	if err := ssh.Connect(keyPath, sshUser, vmConfig.Network.IP, command); err != nil {
+	if err := ssh.RunScriptAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Inline); err != nil {
 		ui.Println(" failed")
 		return fmt.Errorf("VM %q: shell provisioning step %d failed: %w", vmConfig.Name, stepNumber, err)
 	}
@@ -109,7 +113,9 @@ func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config
 	return nil
 }
 
-// provisionFileStep copies a file to the VM via scp, then sets it executable.
+// provisionFileStep copies a file to the VM as root:root with
+// provisionedFileMode, the same result as first-boot write_files. It can
+// replace those files and write to root-owned destinations like /etc.
 func provisionFileStep(keyPath, sshUser string, vmConfig config.VM, step config.Provision, stepNumber, totalSteps int) error {
 	if step.Source == "" || step.Destination == "" {
 		return fmt.Errorf("VM %q: file provisioning step %d requires both 'source' and 'destination'", vmConfig.Name, stepNumber)
@@ -117,16 +123,9 @@ func provisionFileStep(keyPath, sshUser string, vmConfig config.VM, step config.
 
 	ui.Printf("  step %d/%d: file %s → %s...", stepNumber, totalSteps, step.Source, step.Destination)
 
-	remoteDestination := fmt.Sprintf("%s@%s:%s", sshUser, vmConfig.Network.IP, step.Destination)
-	if err := ssh.CopyFiles(keyPath, sshUser, []string{step.Source, remoteDestination}); err != nil {
+	if err := ssh.InstallFileAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Source, step.Destination, provisionedFileMode); err != nil {
 		ui.Println(" failed")
-		return fmt.Errorf("VM %q: file copy step %d failed: %w — check that %s exists", vmConfig.Name, stepNumber, err, step.Source)
-	}
-
-	chmodCommand := []string{"chmod", "0644", step.Destination}
-	if err := ssh.Connect(keyPath, sshUser, vmConfig.Network.IP, chmodCommand); err != nil {
-		ui.Println(" chmod failed")
-		return fmt.Errorf("VM %q: cannot set permissions on %s: %w", vmConfig.Name, step.Destination, err)
+		return fmt.Errorf("VM %q: file provisioning step %d failed: %w — check that %s exists and the VM is reachable", vmConfig.Name, stepNumber, err, step.Source)
 	}
 
 	ui.Println(" done")
