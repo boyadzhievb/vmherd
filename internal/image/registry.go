@@ -14,7 +14,6 @@ type Entry struct {
 	ImageURL    string // HTTPS URL to the qcow2 cloud image
 	ChecksumURL string // HTTPS URL to the vendor checksum file (empty = auto-discover)
 	Filename    string // image filename used to match checksum entries
-	OSVariant   string // virt-install os-variant hint
 }
 
 // Resolve looks up an image spec in the Herdfile images map and constructs an Entry.
@@ -40,7 +39,6 @@ func Resolve(imageSpec string, images map[string]string) (*Entry, error) {
 	}
 
 	filename := path.Base(imageURL)
-	osVariant := deriveOSVariant(distro, codename)
 	description := buildDescription(distro, codename)
 
 	return &Entry{
@@ -49,7 +47,6 @@ func Resolve(imageSpec string, images map[string]string) (*Entry, error) {
 		Description: description,
 		ImageURL:    imageURL,
 		Filename:    filename,
-		OSVariant:   osVariant,
 	}, nil
 }
 
@@ -63,32 +60,6 @@ func availableForDistro(distro string, images map[string]string) []string {
 		}
 	}
 	return codenames
-}
-
-// deriveOSVariant maps a distro:codename to a virt-install os-variant hint.
-func deriveOSVariant(distro, codename string) string {
-	knownVariants := map[string]string{
-		"ubuntu:noble":    "ubuntu24.04",
-		"ubuntu:jammy":    "ubuntu22.04",
-		"ubuntu:focal":    "ubuntu20.04",
-		"ubuntu:resolute": "ubuntu26.04",
-		"ubuntu:questing": "ubuntu25.10",
-		"ubuntu:stonking": "ubuntu26.10",
-		"debian:bookworm": "debian12",
-		"debian:trixie":   "debian13",
-		"fedora:41":       "fedora41",
-		"fedora:42":       "fedora42",
-		"rocky:9":         "rocky9",
-		"almalinux:9":     "almalinux9",
-		"arch:latest":     "archlinux",
-	}
-
-	key := distro + ":" + codename
-	if variant, found := knownVariants[key]; found {
-		return variant
-	}
-
-	return "detect=on,require=off"
 }
 
 // buildDescription creates a human-readable label from distro and codename.
@@ -128,7 +99,6 @@ func ListAll(images map[string]string) []Entry {
 			Description: buildDescription(parts[0], parts[1]),
 			ImageURL:    images[key],
 			Filename:    path.Base(images[key]),
-			OSVariant:   deriveOSVariant(parts[0], parts[1]),
 		})
 	}
 	return entries

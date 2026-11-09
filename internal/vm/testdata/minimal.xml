@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<domain type="kvm">
+  <name>vmherd-myproject-1a2b3c4d-ctrl</name>
+  <memory unit="MiB">4096</memory>
+  <vcpu placement="static">2</vcpu>
+  <os>
+    <type arch="x86_64" machine="q35">hvm</type>
+  </os>
+  <features>
+    <acpi></acpi>
+    <apic></apic>
+  </features>
+  <cpu mode="host-passthrough"></cpu>
+  <clock offset="utc"></clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2"></driver>
+      <source file="/var/lib/libvirt/images/vmherd-myproject-1a2b3c4d-ctrl.qcow2"></source>
+      <target dev="vda" bus="virtio"></target>
+    </disk>
+    <disk type="file" device="cdrom">
+      <driver name="qemu" type="raw"></driver>
+      <source file="/var/lib/libvirt/images/vmherd-myproject-1a2b3c4d-ctrl-seed.iso"></source>
+      <target dev="sda" bus="sata"></target>
+    </disk>
+    <interface type="network">
+      <source network="vmherd-myproject-1a2b3c4d"></source>
+      <mac address="52:54:00:aa:bb:cc"></mac>
+      <model type="virtio"></model>
+    </interface>
+    <serial type="pty">
+      <target port="0"></target>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"></target>
+    </console>
+    <channel type="unix">
+      <target type="virtio" name="org.qemu.guest_agent.0"></target>
+    </channel>
+    <input type="tablet" bus="usb"></input>
+    <graphics type="vnc" autoSocket="yes"></graphics>
+    <rng model="virtio">
+      <backend model="random">/dev/urandom</backend>
+    </rng>
+    <memballoon model="virtio"></memballoon>
+  </devices>
+</domain>

@@ -4,6 +4,22 @@ All notable releases are documented here.
 
 ---
 
+## v0.3.0
+
+**2026-11-09** — Drop virt-install dependency, build VMs from domain XML and pure-Go cloud-init ISOs
+
+### Changed
+- VMs are now created by rendering libvirt domain XML via `encoding/xml` structs and defining them with `virsh define`/`start`, replacing `virt-install`. Parallel `vmherd up` no longer races on virt-install's shared log file.
+- Cloud-init seed ISOs are built in pure Go with ISO 9660 + Rock Ridge extensions (NM for filenames with hyphens). No `genisoimage`, `xorriso` or `cloud-localds` dependency.
+- `vmherd destroy` and `vmherd reload` now explicitly remove VM disks and seed ISOs, fixing orphaned files left by `virsh undefine --remove-all-storage` (which could not manage disks created outside a libvirt pool).
+- `virt-install` is no longer a host prerequisite. Only `qemu-kvm` and `libvirt` are required.
+
+### Removed
+- `OSVariant` field from the image registry (was only needed by virt-install).
+- `buildVirtInstallArgs`, `quoteVirtInstallValue`, `sharedFolderArgs` and the `unsafeVirtInstallPathCharacters` constant from `internal/vm/vm.go`.
+
+---
+
 ## v0.2.0
 
 **2026-11-05** — Safety fixes, working port forwarding and provisioning, DHCP VMs

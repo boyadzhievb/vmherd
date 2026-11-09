@@ -35,9 +35,6 @@ func TestResolveFromImages(t *testing.T) {
 		if entry.ImageURL == "" {
 			t.Errorf("Resolve(%q).ImageURL is empty", tt.spec)
 		}
-		if entry.OSVariant == "" {
-			t.Errorf("Resolve(%q).OSVariant is empty", tt.spec)
-		}
 		if entry.Filename == "" {
 			t.Errorf("Resolve(%q).Filename is empty", tt.spec)
 		}

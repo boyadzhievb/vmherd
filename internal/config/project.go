@@ -193,6 +193,11 @@ func (p *Project) DiskPath(vmName string) string {
 	return fmt.Sprintf("/var/lib/libvirt/images/%s.qcow2", p.DomainName(vmName))
 }
 
+// SeedPath returns the cloud-init seed ISO path for a VM.
+func (p *Project) SeedPath(vmName string) string {
+	return fmt.Sprintf("/var/lib/libvirt/images/%s-seed.iso", p.DomainName(vmName))
+}
+
 // SSHKeyPath returns the path to the project's ed25519 private key.
 func (p *Project) SSHKeyPath() string {
 	return filepath.Join(p.StateDir, "id_ed25519")

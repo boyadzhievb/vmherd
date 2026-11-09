@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -69,38 +68,15 @@ func TestGuestUserUID(t *testing.T) {
 	}
 }
 
-func TestSharedFolderArgs(t *testing.T) {
-	if args, err := sharedFolderArgs(nil, "+1001:+106"); args != nil || err != nil {
-		t.Errorf("expected no args and no error without shared folders, got %v, %v", args, err)
-	}
-	sharedFolders := []SharedFolderMount{
-		{HostPath: "/home/bob/proj", GuestPath: "/vagrant", MountTag: "vmherd_share_0"},
-		{HostPath: "/home/bob/data", GuestPath: "/data", MountTag: "vmherd_share_1"},
-	}
-	wantArgs := []string{
-		"--seclabel", "type=static,model=dac,label=+1001:+106,relabel=yes",
-		"--filesystem", `source.dir="/home/bob/proj",target.dir=vmherd_share_0,accessmode=squash`,
-		"--filesystem", `source.dir="/home/bob/data",target.dir=vmherd_share_1,accessmode=squash`,
-	}
-	gotArgs, err := sharedFolderArgs(sharedFolders, "+1001:+106")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !slices.Equal(gotArgs, wantArgs) {
-		t.Errorf("sharedFolderArgs() =\n  %v\nwant\n  %v", gotArgs, wantArgs)
-	}
-}
-
-func TestSharedFolderArgsRefusesQuote(t *testing.T) {
-	sharedFolders := []SharedFolderMount{{HostPath: `/home/bob/a"b`, GuestPath: "/vagrant", MountTag: "vmherd_share_0"}}
-	if _, err := sharedFolderArgs(sharedFolders, "+1001:+106"); err == nil || !strings.Contains(err.Error(), "/vagrant") {
-		t.Errorf("expected an error naming the share, got %v", err)
-	}
-}
-
-func TestCreateRequiresLabelForSharedFolders(t *testing.T) {
-	err := Create(CreateOptions{
-		VMName:        "web",
+func TestRenderDomainXMLRequiresLabelForSharedFolders(t *testing.T) {
+	_, err := RenderDomainXML(CreateOptions{
+		DomainName:    "test",
+		DiskPath:      "/tmp/test.qcow2",
+		SeedPath:      "/tmp/test-seed.iso",
+		NetworkName:   "test-net",
+		MACAddress:    "52:54:00:00:00:01",
+		Memory:        512,
+		CPUs:          1,
 		SharedFolders: []SharedFolderMount{{HostPath: "/home/bob/proj", GuestPath: "/vagrant", MountTag: "vmherd_share_0"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "QEMUProcessLabel") {

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"gopkg.in/yaml.v3"
@@ -263,8 +264,11 @@ func ReadSavedMACAddress(stateDir, vmName string) (string, error) {
 }
 
 // writeMetaData generates the cloud-init meta-data file with instance identity.
+// The instance-id includes a Unix timestamp so cloud-init treats each create
+// (and each reload) as a new instance and reruns all modules.
 func writeMetaData(seedDir, vmName string) error {
-	content := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmName, vmName)
+	timestamp := time.Now().Unix()
+	content := fmt.Sprintf("instance-id: %s-%d\nlocal-hostname: %s\n", vmName, timestamp, vmName)
 	return os.WriteFile(filepath.Join(seedDir, "meta-data"), []byte(content), 0o600)
 }
 

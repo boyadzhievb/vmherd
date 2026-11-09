@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -45,10 +46,6 @@ func GenerateMACAddress() (string, error) {
 	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", randomBytes[0], randomBytes[1], randomBytes[2]), nil
 }
 
-// sharedFolderAccessMode is the 9p access mode for shared folders. With QEMU
-// running as the host user, "squash" keeps real file modes on the host and
-// ignores guest chown requests QEMU is not allowed to perform.
-const sharedFolderAccessMode = "squash"
 
 const (
 	// domifaddrProtocolColumn is the Protocol column in 'virsh domifaddr' output.
@@ -59,11 +56,6 @@ const (
 	domifaddrMinimumFields = 4
 )
 
-// unsafeVirtInstallPathCharacters can't be passed inside a quoted virt-install
-// value: virt-install double-escapes '"' in the domain XML, and line breaks
-// would end the argument.
-const unsafeVirtInstallPathCharacters = "\"\n\r"
-
 // SharedFolderMount describes a host directory shared with the guest via 9p virtio.
 type SharedFolderMount struct {
 	HostPath  string // absolute path on the host
@@ -71,35 +63,29 @@ type SharedFolderMount struct {
 	MountTag  string // 9p mount tag for virtio passthrough
 }
 
-// CreateOptions holds everything needed to create a VM via virt-install.
+// CreateOptions holds everything needed to create a VM: disk, seed ISO, network,
+// and optional shared folders. The seed ISO is built by cloudinit.BuildAndInstallSeed
+// before calling Create.
 type CreateOptions struct {
-	VMName             string              // human-readable name from the Herdfile
-	DomainName         string              // libvirt domain name (project-scoped)
-	DiskPath           string              // path to the VM's qcow2 disk image
-	CloudInitUserData  string              // path to cloud-init user-data file
-	CloudInitMetaData  string              // path to cloud-init meta-data file
-	CloudInitNetConfig string              // path to cloud-init network-config file
-	NetworkName        string              // libvirt network to attach the VM to
-	MACAddress         string              // assigned MAC address
-	Memory             int                 // RAM in megabytes
-	CPUs               int                 // virtual CPU count
-	OSVariant          string              // virt-install os-variant hint
-	ImagePath          string              // path to the backing cloud image
-	DiskSize           string              // disk size with unit (e.g. 20G)
-	SharedFolders      []SharedFolderMount // 9p host-to-guest directory mounts
-	QEMUProcessLabel   string              // DAC label "+UID:+GID" QEMU runs as; required when SharedFolders is set
-	ConsoleLogPath     string              // if set, serial console output is logged to this file
+	VMName           string              // human-readable name from the Herdfile
+	DomainName       string              // libvirt domain name (project-scoped)
+	DiskPath         string              // path to the VM's qcow2 disk image
+	SeedPath         string              // path to the cloud-init seed ISO
+	NetworkName      string              // libvirt network to attach the VM to
+	MACAddress       string              // assigned MAC address
+	Memory           int                 // RAM in megabytes
+	CPUs             int                 // virtual CPU count
+	ImagePath        string              // path to the backing cloud image
+	DiskSize         string              // disk size with unit (e.g. 20G)
+	SharedFolders    []SharedFolderMount // 9p host-to-guest directory mounts
+	QEMUProcessLabel string              // DAC label "+UID:+GID" QEMU runs as; required when SharedFolders is set
+	ConsoleLogPath   string              // if set, serial console output is logged to this file
 }
 
-// Create provisions a new VM: creates the backing disk and runs virt-install.
+// Create provisions a new VM: creates the backing disk, renders domain XML, and
+// defines+starts the domain via virsh. On failure, it cleans up the disk and
+// seed ISO so re-running 'vmherd up' works without leftover files.
 func Create(opts CreateOptions) error {
-	if len(opts.SharedFolders) > 0 && opts.QEMUProcessLabel == "" {
-		return fmt.Errorf("creating VM %s: shared folders need QEMUProcessLabel so QEMU runs as the host user, not as root or libvirt-qemu", opts.VMName)
-	}
-	args, err := buildVirtInstallArgs(opts)
-	if err != nil {
-		return fmt.Errorf("creating VM %s: %w", opts.VMName, err)
-	}
 	if err := checkDiskPathAvailable(opts.DiskPath, opts.VMName); err != nil {
 		return err
 	}
@@ -108,88 +94,75 @@ func Create(opts CreateOptions) error {
 		return err
 	}
 
-	cmd := exec.Command("sudo", args...)
-	cmd.Stdout = ui.Stdout()
-	cmd.Stderr = ui.Stderr()
+	domainXML, err := RenderDomainXML(opts)
+	if err != nil {
+		cleanupDiskAndSeed(opts)
+		return fmt.Errorf("creating VM %s: %w", opts.VMName, err)
+	}
 
-	if err := cmd.Run(); err != nil {
-		if cleanupErr := exec.Command("sudo", "unlink", opts.DiskPath).Run(); cleanupErr != nil {
-			ui.Printf("Warning: could not clean up disk %s: %v\n", opts.DiskPath, cleanupErr)
-		}
-		return fmt.Errorf("virt-install failed for %s: %w — check that libvirtd is running and you have permission", opts.DomainName, err)
+	if err := defineAndStart(opts.DomainName, domainXML); err != nil {
+		cleanupDiskAndSeed(opts)
+		return fmt.Errorf("creating VM %s: %w — check that libvirtd is running and you have permission", opts.VMName, err)
 	}
 
 	return nil
 }
 
-// buildVirtInstallArgs returns the virt-install command line for opts. Every
-// path is quoted so a comma, space or '=' in it can't split or add options;
-// paths virt-install can't carry safely are refused before anything is created.
-func buildVirtInstallArgs(opts CreateOptions) ([]string, error) {
-	quotedPaths := make(map[string]string)
-	for _, path := range []string{opts.DiskPath, opts.CloudInitUserData, opts.CloudInitMetaData, opts.CloudInitNetConfig, opts.ConsoleLogPath} {
-		quotedPath, err := quoteVirtInstallValue(path)
-		if err != nil {
-			return nil, err
-		}
-		quotedPaths[path] = quotedPath
-	}
-
-	args := []string{
-		"virt-install",
-		"--name", opts.DomainName,
-		"--memory", fmt.Sprintf("%d", opts.Memory),
-		"--vcpus", fmt.Sprintf("%d", opts.CPUs),
-		"--cpu", "host-passthrough",
-		"--disk", fmt.Sprintf("path=%s,format=qcow2", quotedPaths[opts.DiskPath]),
-		"--cloud-init", fmt.Sprintf("user-data=%s,meta-data=%s,network-config=%s",
-			quotedPaths[opts.CloudInitUserData], quotedPaths[opts.CloudInitMetaData], quotedPaths[opts.CloudInitNetConfig]),
-		"--network", fmt.Sprintf("network=%s,mac=%s", opts.NetworkName, opts.MACAddress),
-		"--os-variant", opts.OSVariant,
-		"--graphics", "vnc,listen=none",
-		"--noautoconsole",
-		"--import",
-		"--autostart",
-	}
-
-	if opts.ConsoleLogPath != "" {
-		args = append(args, "--serial", fmt.Sprintf("file,path=%s", quotedPaths[opts.ConsoleLogPath]))
-	}
-
-	sharedArgs, err := sharedFolderArgs(opts.SharedFolders, opts.QEMUProcessLabel)
+// defineAndStart writes domain XML to a temp file, defines the domain via virsh,
+// enables autostart, and starts it. The temp file is always removed. If start
+// fails after a successful define, the domain is undefined before returning.
+func defineAndStart(domainName string, domainXML []byte) error {
+	tmpFile, err := os.CreateTemp("", "vmherd-domain-*.xml")
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("creating temp file for domain XML: %w", err)
 	}
-	return append(args, sharedArgs...), nil
-}
-
-// quoteVirtInstallValue wraps a path in double quotes for a virt-install
-// sub-option and doubles backslashes, which virt-install unescapes inside quotes.
-// It refuses '"' (virt-install mangles it in the XML) and line breaks.
-func quoteVirtInstallValue(path string) (string, error) {
-	if strings.ContainsAny(path, unsafeVirtInstallPathCharacters) {
-		return "", fmt.Errorf("path %q contains a double quote or line break, which virt-install can't handle — rename the project directory (or the shared folder) so its path has neither", path)
-	}
-	return `"` + strings.ReplaceAll(path, `\`, `\\`) + `"`, nil
-}
-
-// sharedFolderArgs returns the virt-install arguments for 9p shared folders and,
-// when there are any, the DAC seclabel that runs QEMU as the host user so files
-// it creates are owned by that user and never by root. Host paths are quoted.
-func sharedFolderArgs(sharedFolders []SharedFolderMount, qemuProcessLabel string) ([]string, error) {
-	if len(sharedFolders) == 0 {
-		return nil, nil
-	}
-	args := []string{"--seclabel", fmt.Sprintf("type=static,model=dac,label=%s,relabel=yes", qemuProcessLabel)}
-	for _, sharedFolder := range sharedFolders {
-		quotedHostPath, err := quoteVirtInstallValue(sharedFolder.HostPath)
-		if err != nil {
-			return nil, fmt.Errorf("sharing %s: %w", sharedFolder.GuestPath, err)
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if removeErr := os.Remove(tmpPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			ui.Printf("Warning: could not remove temp XML file %s: %v\n", tmpPath, removeErr)
 		}
-		args = append(args, "--filesystem", fmt.Sprintf("source.dir=%s,target.dir=%s,accessmode=%s",
-			quotedHostPath, sharedFolder.MountTag, sharedFolderAccessMode))
+	}()
+
+	if _, err := tmpFile.Write(domainXML); err != nil {
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			ui.Printf("Warning: could not close temp XML file %s: %v\n", tmpPath, closeErr)
+		}
+		return fmt.Errorf("writing domain XML: %w", err)
 	}
-	return args, nil
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing domain XML temp file: %w", err)
+	}
+
+	if err := libvirt.Virsh("define", tmpPath); err != nil {
+		return fmt.Errorf("virsh define failed: %w", err)
+	}
+
+	if err := libvirt.Virsh("autostart", domainName); err != nil {
+		if undefErr := libvirt.Virsh("undefine", domainName); undefErr != nil {
+			ui.Printf("Warning: could not undefine %s after autostart failure: %v\n", domainName, undefErr)
+		}
+		return fmt.Errorf("virsh autostart failed: %w", err)
+	}
+
+	if err := libvirt.Virsh("start", domainName); err != nil {
+		if undefErr := libvirt.Virsh("undefine", domainName); undefErr != nil {
+			ui.Printf("Warning: could not undefine %s after start failure: %v\n", domainName, undefErr)
+		}
+		return fmt.Errorf("virsh start failed: %w", err)
+	}
+
+	return nil
+}
+
+// cleanupDiskAndSeed removes the disk and seed ISO after a failed creation
+// attempt so re-running 'vmherd up' can start fresh.
+func cleanupDiskAndSeed(opts CreateOptions) {
+	if cleanupErr := exec.Command("sudo", "unlink", opts.DiskPath).Run(); cleanupErr != nil {
+		ui.Printf("Warning: could not clean up disk %s: %v\n", opts.DiskPath, cleanupErr)
+	}
+	if cleanupErr := exec.Command("sudo", "rm", "-f", opts.SeedPath).Run(); cleanupErr != nil {
+		ui.Printf("Warning: could not clean up seed %s: %v\n", opts.SeedPath, cleanupErr)
+	}
 }
 
 // Start boots a stopped VM.
@@ -254,7 +227,10 @@ func ForceStop(domainName string) error {
 	return libvirt.Virsh("destroy", domainName)
 }
 
-// Destroy removes a VM and its storage.
+// Destroy stops a running VM and undefines its libvirt domain. It does not
+// remove the disk or seed ISO — call RemoveDisk and cloudinit.RemoveSeed
+// separately, because these files are created outside libvirt's storage pool
+// and virsh --remove-all-storage cannot manage them.
 func Destroy(domainName string) error {
 	state := State(domainName)
 	if state == StateRunning {
@@ -263,8 +239,24 @@ func Destroy(domainName string) error {
 		}
 	}
 
-	if err := libvirt.Virsh("undefine", domainName, "--remove-all-storage"); err != nil {
+	if err := libvirt.Virsh("undefine", domainName); err != nil {
 		return fmt.Errorf("cannot destroy VM %s: %w", domainName, err)
+	}
+	return nil
+}
+
+// RemoveDisk removes a VM's qcow2 disk via sudo. It is not an error if the
+// file does not exist (idempotent for destroy/cleanup).
+func RemoveDisk(diskPath string) error {
+	checkCmd := exec.Command("sudo", "test", "-e", diskPath)
+	if checkCmd.Run() != nil {
+		return nil
+	}
+	unlinkCmd := exec.Command("sudo", "unlink", diskPath)
+	unlinkCmd.Stdout = ui.Stdout()
+	unlinkCmd.Stderr = ui.Stderr()
+	if err := unlinkCmd.Run(); err != nil {
+		return fmt.Errorf("removing disk %s: %w", diskPath, err)
 	}
 	return nil
 }

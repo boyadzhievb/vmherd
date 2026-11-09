@@ -15,7 +15,7 @@
 1. **No external registry.** Images come directly from distro vendors (cloud-images.ubuntu.com, cloud.debian.org, etc.).
 2. **Declarative.** A `Herdfile` (YAML) defines VMs — name, image, resources, network, provisioning.
 3. **Idempotent operations.** `vmherd up` creates what's missing, starts what's stopped, leaves what's running.
-4. **Minimal dependencies.** Only requires: libvirt + qemu-kvm + virt-install.
+4. **Minimal dependencies.** Only requires: libvirt + qemu-kvm.
 5. **Single binary.** `go build` produces one binary, no plugins.
 6. **SSH-first.** Every VM gets an ed25519 key pair. `vmherd ssh <name>` just works.
 
@@ -116,7 +116,7 @@ All images verified via SHA256 checksums from the vendor. GPG verification where
 ## Architecture
 
 ```
-Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM VMs
+Herdfile (YAML) → vmherd CLI → libvirt API (via virsh + domain XML) → KVM VMs
                               → cloud-init (user-data, network-config, meta-data)
                               → cloud images (cached locally, SHA256 verified)
 ```
@@ -155,7 +155,7 @@ Herdfile (YAML) → vmherd CLI → libvirt API (via virsh/virt-install) → KVM 
 - **Function length limit: 80 lines.** Break long functions into sub-functions. Excludes test functions.
 - **No copy-paste duplication.** Same pattern 3+ places → shared helper. Near-duplicate blocks >10 lines → refactor.
 - **Typed enums over raw strings.** VM states (`running`, `stopped`, `creating`), image formats, provisioner types → typed string constants.
-- **No shell-out when a library exists.** Prefer `libvirt-go` bindings over `exec.Command("virsh", ...)` where stable bindings exist. Shell-out is acceptable for `virt-install` (no Go equivalent).
+- **No shell-out when a library exists.** Prefer `libvirt-go` bindings over `exec.Command("virsh", ...)` where stable bindings exist. Shell-out is acceptable for `qemu-img` (disk creation) and `virsh` (domain lifecycle, pending M2.7/M2.8).
 - **No swallowed errors.** Never `_ = someFunc()` for functions that return errors. Log or return every error.
 - **No global mutable state.** Pass dependencies explicitly. No package-level `var` that gets mutated at runtime.
 

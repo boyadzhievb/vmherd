@@ -16,7 +16,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// maxParallelVMCreations limits how many VMs are created concurrently via virt-install.
+// maxParallelVMCreations limits how many VMs are created concurrently.
 const maxParallelVMCreations = 4
 
 // vmCreateResult tracks the outcome of a single VM creation attempt.
@@ -208,7 +208,7 @@ func createVMsInParallel(
 	return results
 }
 
-// createSingleVM generates cloud-init config and runs virt-install for one VM.
+// createSingleVM generates cloud-init config, builds the seed ISO, and creates a VM.
 func createSingleVM(
 	project *config.Project,
 	vmConfig config.VM,
@@ -241,28 +241,30 @@ func createSingleVM(
 		return err
 	}
 
+	seedPath := project.SeedPath(vmConfig.Name)
+	if err := cloudinit.BuildAndInstallSeed(ciFiles, seedPath); err != nil {
+		return err
+	}
+
 	var consoleLogPath string
 	if vmConfig.ConsoleLog {
 		consoleLogPath = project.ConsoleLogPath(vmConfig.Name)
 	}
 
 	if err := vm.Create(vm.CreateOptions{
-		VMName:             vmConfig.Name,
-		DomainName:         domainName,
-		DiskPath:           project.DiskPath(vmConfig.Name),
-		CloudInitUserData:  ciFiles.UserData,
-		CloudInitMetaData:  ciFiles.MetaData,
-		CloudInitNetConfig: ciFiles.NetworkConfig,
-		NetworkName:        project.Herdfile.Network.Name,
-		MACAddress:         macAddress,
-		Memory:             vmConfig.Memory,
-		CPUs:               vmConfig.CPUs,
-		OSVariant:          img.entry.OSVariant,
-		ImagePath:          img.cachePath,
-		DiskSize:           vmConfig.Disk,
-		SharedFolders:      sharedMounts,
-		QEMUProcessLabel:   shareIdentity.qemuProcessLabel,
-		ConsoleLogPath:     consoleLogPath,
+		VMName:           vmConfig.Name,
+		DomainName:       domainName,
+		DiskPath:         project.DiskPath(vmConfig.Name),
+		SeedPath:         seedPath,
+		NetworkName:      project.Herdfile.Network.Name,
+		MACAddress:       macAddress,
+		Memory:           vmConfig.Memory,
+		CPUs:             vmConfig.CPUs,
+		ImagePath:        img.cachePath,
+		DiskSize:         vmConfig.Disk,
+		SharedFolders:    sharedMounts,
+		QEMUProcessLabel: shareIdentity.qemuProcessLabel,
+		ConsoleLogPath:   consoleLogPath,
 	}); err != nil {
 		return err
 	}

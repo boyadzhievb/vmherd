@@ -31,7 +31,7 @@ Use this when implementing or reviewing changes in a specific area. Check the re
 
 ## vm/ (VM lifecycle)
 
-- [ ] Disk cleaned up on virt-install failure (`sudo unlink`)
+- [ ] Disk cleaned up on VM creation failure (`sudo unlink`)
 - [ ] Errors from cleanup operations logged as warnings (not swallowed with `_`)
 - [ ] Error messages use VM name (not domain name) for user-facing output
 - [ ] New `CreateOptions` fields documented with inline comments

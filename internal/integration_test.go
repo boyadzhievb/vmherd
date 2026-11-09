@@ -88,20 +88,23 @@ func TestFullVMLifecycle(t *testing.T) {
 
 	testMACAddress := "52:54:00:aa:bb:cc"
 
+	seedPath := filepath.Join(testDiskDir, testDomainName+"-seed.iso")
+	if err := cloudinit.BuildAndInstallSeed(ciFiles, seedPath); err != nil {
+		t.Fatalf("cannot build seed ISO: %v", err)
+	}
+	t.Cleanup(func() { cloudinit.RemoveSeed(seedPath) })
+
 	if err := vm.Create(vm.CreateOptions{
-		VMName:             vmConfig.Name,
-		DomainName:         testDomainName,
-		DiskPath:           diskPath,
-		CloudInitUserData:  ciFiles.UserData,
-		CloudInitMetaData:  ciFiles.MetaData,
-		CloudInitNetConfig: ciFiles.NetworkConfig,
-		NetworkName:        testNetworkName,
-		MACAddress:         testMACAddress,
-		Memory:             vmConfig.Memory,
-		CPUs:               vmConfig.CPUs,
-		OSVariant:          entry.OSVariant,
-		ImagePath:          imagePath,
-		DiskSize:           vmConfig.Disk,
+		VMName:      vmConfig.Name,
+		DomainName:  testDomainName,
+		DiskPath:    diskPath,
+		SeedPath:    seedPath,
+		NetworkName: testNetworkName,
+		MACAddress:  testMACAddress,
+		Memory:      vmConfig.Memory,
+		CPUs:        vmConfig.CPUs,
+		ImagePath:   imagePath,
+		DiskSize:    vmConfig.Disk,
 	}); err != nil {
 		t.Fatalf("cannot create VM: %v", err)
 	}

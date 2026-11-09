@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/boyadzhievb/vmherd/internal/cloudinit"
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/network"
 	"github.com/boyadzhievb/vmherd/internal/ui"
@@ -41,6 +42,12 @@ func newDestroyCmd() *cobra.Command {
 				ui.Printf("Destroying %s...\n", vmConfig.Name)
 				stopPortForwarding(project, vmConfig)
 				if err := vm.Destroy(domainName); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				}
+				if err := vm.RemoveDisk(project.DiskPath(vmConfig.Name)); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				}
+				if err := cloudinit.RemoveSeed(project.SeedPath(vmConfig.Name)); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 				}
 				if err := config.RemoveVMStateDir(project.StateDir, vmConfig.Name); err != nil {

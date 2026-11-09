@@ -69,11 +69,19 @@ Examples:
 
 			for _, vmConfig := range vmsToReload {
 				domainName := project.DomainName(vmConfig.Name)
+				oldDiskPath := project.DiskPath(vmConfig.Name)
+				oldSeedPath := project.SeedPath(vmConfig.Name)
 
 				stopPortForwarding(project, vmConfig)
 
 				if err := shutdownAndDestroy(domainName, vmConfig.Name); err != nil {
 					return err
+				}
+				if err := vm.RemoveDisk(oldDiskPath); err != nil {
+					return fmt.Errorf("cannot remove old disk for %s: %w", vmConfig.Name, err)
+				}
+				if err := cloudinit.RemoveSeed(oldSeedPath); err != nil {
+					return fmt.Errorf("cannot remove old seed for %s: %w", vmConfig.Name, err)
 				}
 
 				// The old domain is gone, so recreate under the project-unique name.
@@ -133,7 +141,8 @@ func shutdownAndDestroy(domainName, vmName string) error {
 	return nil
 }
 
-// createVM resolves the image, generates cloud-init files, and creates a new VM.
+// createVM resolves the image, generates cloud-init files, builds the seed ISO,
+// and creates a new VM.
 func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, subnetBase, dnsServer string) error {
 	entry, err := image.Resolve(vmConfig.Image, project.Herdfile.Images)
 	if err != nil {
@@ -169,28 +178,30 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		return err
 	}
 
+	seedPath := project.SeedPath(vmConfig.Name)
+	if err := cloudinit.BuildAndInstallSeed(ciFiles, seedPath); err != nil {
+		return err
+	}
+
 	var consoleLogPath string
 	if vmConfig.ConsoleLog {
 		consoleLogPath = project.ConsoleLogPath(vmConfig.Name)
 	}
 
 	if err := vm.Create(vm.CreateOptions{
-		VMName:             vmConfig.Name,
-		DomainName:         domainName,
-		DiskPath:           project.DiskPath(vmConfig.Name),
-		CloudInitUserData:  ciFiles.UserData,
-		CloudInitMetaData:  ciFiles.MetaData,
-		CloudInitNetConfig: ciFiles.NetworkConfig,
-		NetworkName:        project.Herdfile.Network.Name,
-		MACAddress:         macAddress,
-		Memory:             vmConfig.Memory,
-		CPUs:               vmConfig.CPUs,
-		OSVariant:          entry.OSVariant,
-		ImagePath:          imagePath,
-		DiskSize:           vmConfig.Disk,
-		SharedFolders:      sharedMounts,
-		QEMUProcessLabel:   shareIdentity.qemuProcessLabel,
-		ConsoleLogPath:     consoleLogPath,
+		VMName:           vmConfig.Name,
+		DomainName:       domainName,
+		DiskPath:         project.DiskPath(vmConfig.Name),
+		SeedPath:         seedPath,
+		NetworkName:      project.Herdfile.Network.Name,
+		MACAddress:       macAddress,
+		Memory:           vmConfig.Memory,
+		CPUs:             vmConfig.CPUs,
+		ImagePath:        imagePath,
+		DiskSize:         vmConfig.Disk,
+		SharedFolders:    sharedMounts,
+		QEMUProcessLabel: shareIdentity.qemuProcessLabel,
+		ConsoleLogPath:   consoleLogPath,
 	}); err != nil {
 		return err
 	}
