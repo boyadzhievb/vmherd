@@ -101,18 +101,3 @@ func TestParseLeaseIPv4(t *testing.T) {
 		t.Errorf("parseLeaseIPv4() without a lease = %q, want empty", got)
 	}
 }
-
-func TestIsPoweredOn(t *testing.T) {
-	testCases := map[VMState]bool{
-		StateRunning:      true,
-		StateShuttingDown: true,
-		StateStopped:      false,
-		StateNotCreated:   false,
-		VMState("paused"): false,
-	}
-	for state, wantPoweredOn := range testCases {
-		if gotPoweredOn := isPoweredOn(state); gotPoweredOn != wantPoweredOn {
-			t.Errorf("isPoweredOn(%q) = %v, want %v", state, gotPoweredOn, wantPoweredOn)
-		}
-	}
-}

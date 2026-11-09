@@ -118,20 +118,22 @@ Examples:
 // shutdownAndDestroy gracefully stops a VM (forcing only after the shutdown
 // timeout) and destroys it.
 func shutdownAndDestroy(domainName, vmName string) error {
-	if !vm.Exists(domainName) {
+	state, err := vm.State(domainName)
+	if err != nil {
+		return fmt.Errorf("cannot reload %s: %w", vmName, err)
+	}
+	if state == vm.StateNotCreated {
 		ui.Printf("%s does not exist, will create fresh.\n", vmName)
 		return nil
 	}
 
-	if vm.State(domainName) == vm.StateRunning {
+	if state != vm.StateStopped {
 		ui.Printf("Stopping %s...\n", vmName)
-		forcedOff, err := vm.StopGracefully(domainName, vm.GracefulShutdownTimeout)
+		stopOutcome, err := vm.StopGracefully(domainName, vm.GracefulShutdownTimeout)
 		if err != nil {
 			return fmt.Errorf("cannot stop %s before reload: %w", vmName, err)
 		}
-		if forcedOff {
-			ui.Printf("%s did not shut down within %s and was forced off.\n", vmName, vm.GracefulShutdownTimeout)
-		}
+		reportForcedStop(vmName, stopOutcome)
 	}
 
 	ui.Printf("Destroying %s...\n", vmName)

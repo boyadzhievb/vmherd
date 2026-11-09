@@ -20,14 +20,12 @@ func stopVMsGracefully(project *config.Project, vms []config.VM) error {
 		ui.Printf("Stopping %s...\n", vmConfig.Name)
 		stopPortForwarding(project, vmConfig)
 		group.Go(func() error {
-			forcedOff, err := vm.StopGracefully(project.DomainName(vmConfig.Name), vm.GracefulShutdownTimeout)
+			stopOutcome, err := vm.StopGracefully(project.DomainName(vmConfig.Name), vm.GracefulShutdownTimeout)
 			if err != nil {
 				stopErrors[index] = fmt.Errorf("stopping %s: %w", vmConfig.Name, err)
 				return nil
 			}
-			if forcedOff {
-				ui.Printf("%s did not shut down within %s and was forced off.\n", vmConfig.Name, vm.GracefulShutdownTimeout)
-			}
+			reportForcedStop(vmConfig.Name, stopOutcome)
 			return nil
 		})
 	}
@@ -35,4 +33,15 @@ func stopVMsGracefully(project *config.Project, vms []config.VM) error {
 		return fmt.Errorf("stopping VMs: %w", err)
 	}
 	return errors.Join(stopErrors...)
+}
+
+// reportForcedStop tells the user when a VM was forced off instead of
+// shutting down by itself.
+func reportForcedStop(vmName string, stopOutcome vm.StopOutcome) {
+	switch stopOutcome {
+	case vm.StopForcedAfterTimeout:
+		ui.Printf("%s did not shut down within %s and was forced off.\n", vmName, vm.GracefulShutdownTimeout)
+	case vm.StopForcedNoGuest:
+		ui.Printf("%s was crashed or suspended and was forced off.\n", vmName)
+	}
 }

@@ -110,10 +110,11 @@ func TestFullVMLifecycle(t *testing.T) {
 	}
 	t.Log("VM created")
 
-	if !vm.Exists(testDomainName) {
-		t.Fatal("VM should exist after creation")
+	state, err := vm.State(testDomainName)
+	if err != nil {
+		t.Fatalf("cannot query VM state: %v", err)
 	}
-	if state := vm.State(testDomainName); state != vm.StateRunning {
+	if state != vm.StateRunning {
 		t.Fatalf("expected VM state 'running', got %q", state)
 	}
 
@@ -132,8 +133,8 @@ func TestFullVMLifecycle(t *testing.T) {
 		t.Fatalf("cannot destroy VM: %v", err)
 	}
 
-	if vm.Exists(testDomainName) {
-		t.Error("VM should not exist after destroy")
+	if state, err := vm.State(testDomainName); err != nil || state != vm.StateNotCreated {
+		t.Errorf("VM should not exist after destroy: state %q, error %v", state, err)
 	}
 	t.Log("VM destroyed")
 
@@ -146,8 +147,8 @@ func TestFullVMLifecycle(t *testing.T) {
 // cleanup removes any leftover test resources from a previous failed run.
 func cleanup(t *testing.T) {
 	t.Helper()
-	if vm.Exists(testDomainName) {
-		_ = vm.ForceStop(testDomainName)
+	if state, err := vm.State(testDomainName); err == nil && state != vm.StateNotCreated {
+		// Destroy forces an active domain off before undefining it.
 		_ = vm.Destroy(testDomainName)
 	}
 	_ = network.Destroy(testNetworkName)

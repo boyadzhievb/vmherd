@@ -8,14 +8,11 @@ import (
 
 const integrationDomain = "vmherd-integration-test"
 
-func TestVMExistsReturnsFalseForMissing(t *testing.T) {
-	if Exists("vmherd-nonexistent-domain-xyz") {
-		t.Error("expected Exists to return false for a nonexistent domain")
-	}
-}
-
 func TestVMStateReturnsNotCreatedForMissing(t *testing.T) {
-	state := State("vmherd-nonexistent-domain-xyz")
+	state, err := State("vmherd-nonexistent-domain-xyz")
+	if err != nil {
+		t.Fatalf("State() of a missing domain returned an error: %v", err)
+	}
 	if state != StateNotCreated {
 		t.Errorf("expected 'not created', got %q", state)
 	}

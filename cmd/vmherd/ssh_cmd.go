@@ -1,11 +1,8 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
-	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
 
@@ -27,9 +24,8 @@ func newSSHCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			domainName := project.DomainName(vms[0].Name)
-			if vm.State(domainName) != vm.StateRunning {
-				return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmName, vmName)
+			if err := requireRunningVM(project, vms[0].Name); err != nil {
+				return err
 			}
 
 			targetVM, err := withCurrentAddress(project, vms[0])

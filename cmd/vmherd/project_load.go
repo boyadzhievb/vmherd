@@ -40,7 +40,21 @@ func adoptLegacyDomainName(project *config.Project, vmName string) error {
 	}
 
 	legacyDomainName := project.LegacyDomainName(vmName)
-	if legacyDomainName == project.DomainName(vmName) || vm.Exists(project.DomainName(vmName)) || !vm.Exists(legacyDomainName) {
+	if legacyDomainName == project.DomainName(vmName) {
+		return nil
+	}
+	currentNameState, err := vm.State(project.DomainName(vmName))
+	if err != nil {
+		return fmt.Errorf("looking up VM %s: %w", vmName, err)
+	}
+	if currentNameState != vm.StateNotCreated {
+		return nil
+	}
+	legacyNameState, err := vm.State(legacyDomainName)
+	if err != nil {
+		return fmt.Errorf("checking for an old-style domain of VM %s: %w", vmName, err)
+	}
+	if legacyNameState == vm.StateNotCreated {
 		return nil
 	}
 

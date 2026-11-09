@@ -25,8 +25,11 @@ func newDownCmd() *cobra.Command {
 
 			var runningVMs []config.VM
 			for _, vmConfig := range vms {
-				state := vm.State(project.DomainName(vmConfig.Name))
-				if state != vm.StateRunning {
+				state, err := vm.State(project.DomainName(vmConfig.Name))
+				if err != nil {
+					return err
+				}
+				if state == vm.StateStopped || state == vm.StateNotCreated {
 					ui.Printf("%s is not running (state: %s).\n", vmConfig.Name, state)
 					continue
 				}

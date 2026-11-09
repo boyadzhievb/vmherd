@@ -54,9 +54,11 @@ Examples:
 // provisionVM executes all provisioning steps on a single running VM.
 func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser string) error {
 	domainName := project.DomainName(vmConfig.Name)
-	currentState := vm.State(domainName)
-
-	if currentState != vm.StateRunning {
+	currentState, err := vm.State(domainName)
+	if err != nil {
+		return fmt.Errorf("provisioning %s: %w", vmConfig.Name, err)
+	}
+	if !currentState.IsRunning() {
 		return fmt.Errorf("VM %q is not running (state: %s) — run 'vmherd up %s' first", vmConfig.Name, currentState, vmConfig.Name)
 	}
 
@@ -65,7 +67,7 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 		return nil
 	}
 
-	vmConfig, err := withCurrentAddress(project, vmConfig)
+	vmConfig, err = withCurrentAddress(project, vmConfig)
 	if err != nil {
 		return err
 	}

@@ -34,7 +34,11 @@ func newDestroyCmd() *cobra.Command {
 			for _, vmConfig := range vms {
 				domainName := project.DomainName(vmConfig.Name)
 
-				if !vm.Exists(domainName) {
+				state, err := vm.State(domainName)
+				if err != nil {
+					return fmt.Errorf("cannot destroy %s: %w", vmConfig.Name, err)
+				}
+				if state == vm.StateNotCreated {
 					ui.Printf("%s does not exist, skipping.\n", vmConfig.Name)
 					continue
 				}

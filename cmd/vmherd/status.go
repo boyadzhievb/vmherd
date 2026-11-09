@@ -34,7 +34,10 @@ func newStatusCmd() *cobra.Command {
 
 			for _, vmConfig := range sortedVMs {
 				domainName := project.DomainName(vmConfig.Name)
-				state := vm.State(domainName)
+				state, err := vm.State(domainName)
+				if err != nil {
+					return err
+				}
 
 				_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n",
 					vmConfig.Name,
@@ -56,7 +59,7 @@ func statusAddress(domainName string, vmConfig config.VM, state vm.VMState) stri
 	if !usesDHCP(vmConfig) {
 		return vmConfig.Network.IP
 	}
-	if state != vm.StateRunning {
+	if !state.IsRunning() {
 		return "dhcp"
 	}
 	leasedAddress, err := vm.LeaseAddress(domainName)

@@ -63,15 +63,20 @@ func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, err
 
 	for _, vmConfig := range vms {
 		domainName := project.DomainName(vmConfig.Name)
-		state := vm.State(domainName)
+		state, err := vm.State(domainName)
+		if err != nil {
+			return nil, fmt.Errorf("cannot restart %s: %w", vmConfig.Name, err)
+		}
 
 		switch state {
-		case vm.StateRunning:
-			runningVMs = append(runningVMs, vmConfig)
+		case vm.StateNotCreated:
+			return nil, fmt.Errorf("cannot restart %s: VM does not exist — run 'vmherd up %s' first", vmConfig.Name, vmConfig.Name)
 		case vm.StateStopped:
 			stoppedVMs = append(stoppedVMs, vmConfig)
 		default:
-			return nil, fmt.Errorf("cannot restart %s: VM does not exist — run 'vmherd up %s' first", vmConfig.Name, vmConfig.Name)
+			// Running, paused, crashed, sleeping or shutting down:
+			// stopVMsGracefully brings each of these to power-off.
+			runningVMs = append(runningVMs, vmConfig)
 		}
 	}
 

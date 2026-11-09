@@ -26,6 +26,19 @@ func usesDHCP(vmConfig config.VM) bool {
 	return vmConfig.Network.IP == ""
 }
 
+// requireRunningVM returns an actionable error unless the VM's domain is
+// running, so ssh and scp fail before trying to connect.
+func requireRunningVM(project *config.Project, vmName string) error {
+	state, err := vm.State(project.DomainName(vmName))
+	if err != nil {
+		return err
+	}
+	if !state.IsRunning() {
+		return fmt.Errorf("VM %s is not running (state: %s) — start it with 'vmherd up %s'", vmName, state, vmName)
+	}
+	return nil
+}
+
 // withCurrentAddress returns a copy of vmConfig whose Network.IP is the
 // address to connect to: the static ip, or the VM's current DHCP lease.
 // A DHCP VM without a lease yet is an error with a recovery hint.

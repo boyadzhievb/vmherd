@@ -6,7 +6,6 @@ import (
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
-	"github.com/boyadzhievb/vmherd/internal/vm"
 	"github.com/spf13/cobra"
 )
 
@@ -36,9 +35,8 @@ Examples:
 				for _, arg := range args {
 					colonIdx := strings.Index(arg, ":")
 					if colonIdx > 0 && arg[:colonIdx] == vmConfig.Name {
-						domainName := project.DomainName(vmConfig.Name)
-						if vm.State(domainName) != vm.StateRunning {
-							return fmt.Errorf("VM %s is not running — start it with 'vmherd up %s'", vmConfig.Name, vmConfig.Name)
+						if err := requireRunningVM(project, vmConfig.Name); err != nil {
+							return err
 						}
 					}
 				}

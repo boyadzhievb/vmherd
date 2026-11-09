@@ -102,24 +102,24 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 
 	for _, vmConfig := range vms {
 		domainName := project.DomainName(vmConfig.Name)
-		state := vm.State(domainName)
+		state, err := vm.State(domainName)
+		if err != nil {
+			return nil, err
+		}
 
-		if state == vm.StateRunning {
+		if state == vm.StateNotCreated {
+			vmsToCreate = append(vmsToCreate, vmConfig)
+			continue
+		}
+		if state.IsRunning() {
 			ui.Printf("%s is already running.\n", vmConfig.Name)
-			activeVMs = append(activeVMs, vmConfig)
-			continue
-		}
-
-		if state == vm.StateStopped {
-			ui.Printf("Starting %s...\n", vmConfig.Name)
-			if err := vm.Start(domainName); err != nil {
-				return nil, err
+		} else {
+			ui.Println(startExistingVMMessage(vmConfig.Name, state))
+			if err := vm.EnsureRunning(domainName, state); err != nil {
+				return nil, fmt.Errorf("bringing up %s: %w", vmConfig.Name, err)
 			}
-			activeVMs = append(activeVMs, vmConfig)
-			continue
 		}
-
-		vmsToCreate = append(vmsToCreate, vmConfig)
+		activeVMs = append(activeVMs, vmConfig)
 	}
 
 	if len(vmsToCreate) == 0 {
@@ -151,6 +151,23 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 	}
 
 	return activeVMs, nil
+}
+
+// startExistingVMMessage says what 'up' does to bring an existing, not
+// running VM in state back up.
+func startExistingVMMessage(vmName string, state vm.VMState) string {
+	switch state {
+	case vm.StatePaused:
+		return fmt.Sprintf("Resuming paused %s...", vmName)
+	case vm.StatePMSuspended:
+		return fmt.Sprintf("Waking suspended %s...", vmName)
+	case vm.StateShuttingDown, vm.StateDying:
+		return fmt.Sprintf("%s is shutting down; waiting for it to power off, then starting it...", vmName)
+	case vm.StateCrashed:
+		return fmt.Sprintf("Warning: %s crashed; forcing it off and starting it again...", vmName)
+	default:
+		return fmt.Sprintf("Starting %s...", vmName)
+	}
 }
 
 // resolvedImage holds a pre-resolved and pre-downloaded image entry.

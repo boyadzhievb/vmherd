@@ -7,34 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/boyadzhievb/vmherd/internal/libvirt"
 	"github.com/boyadzhievb/vmherd/internal/ui"
-)
-
-// VMState represents the lifecycle state of a virtual machine.
-type VMState string
-
-const (
-	// StateRunning indicates the VM is powered on and active.
-	StateRunning VMState = "running"
-	// StateStopped indicates the VM exists but is powered off.
-	StateStopped VMState = "shut off"
-	// StateNotCreated indicates the VM does not exist in libvirt.
-	StateNotCreated VMState = "not created"
-	// StateShuttingDown indicates the guest is handling a shutdown request.
-	StateShuttingDown VMState = "in shutdown"
-)
-
-const (
-	// GracefulShutdownTimeout is how long StopGracefully waits for the guest
-	// to power off before forcing it off (Vagrant's graceful_halt_timeout).
-	GracefulShutdownTimeout = 60 * time.Second
-	// shutdownInitialPollInterval is the first wait between state checks while stopping.
-	shutdownInitialPollInterval = 1 * time.Second
-	// shutdownMaxPollInterval caps the backoff between state checks while stopping.
-	shutdownMaxPollInterval = 4 * time.Second
 )
 
 // GenerateMACAddress creates a random MAC address with the QEMU OUI prefix (52:54:00).
@@ -45,7 +20,6 @@ func GenerateMACAddress() (string, error) {
 	}
 	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", randomBytes[0], randomBytes[1], randomBytes[2]), nil
 }
-
 
 const (
 	// domifaddrProtocolColumn is the Protocol column in 'virsh domifaddr' output.
@@ -165,86 +139,6 @@ func cleanupDiskAndSeed(opts CreateOptions) {
 	}
 }
 
-// Start boots a stopped VM.
-func Start(domainName string) error {
-	if err := libvirt.Virsh("start", domainName); err != nil {
-		return fmt.Errorf("cannot start VM %s: %w", domainName, err)
-	}
-	return nil
-}
-
-// Shutdown sends a graceful shutdown signal to a VM.
-func Shutdown(domainName string) error {
-	if err := libvirt.Virsh("shutdown", domainName); err != nil {
-		return fmt.Errorf("cannot shut down VM %s: %w", domainName, err)
-	}
-	return nil
-}
-
-// StopGracefully asks the guest to shut down (ACPI) and waits up to timeout
-// for it to power off, checking with backoff. It forces the VM off if the
-// request fails or the timeout passes, and reports whether it had to.
-func StopGracefully(domainName string, timeout time.Duration) (bool, error) {
-	if err := Shutdown(domainName); err != nil {
-		ui.Printf("Warning: %v — forcing it off\n", err)
-		return true, forceStopIfRunning(domainName)
-	}
-
-	deadline := time.Now().Add(timeout)
-	pollInterval := shutdownInitialPollInterval
-	for time.Now().Before(deadline) {
-		if !isPoweredOn(State(domainName)) {
-			return false, nil
-		}
-		time.Sleep(min(pollInterval, time.Until(deadline)))
-		pollInterval = min(pollInterval*2, shutdownMaxPollInterval)
-	}
-	if !isPoweredOn(State(domainName)) {
-		return false, nil
-	}
-	return true, forceStopIfRunning(domainName)
-}
-
-// isPoweredOn reports whether a domain in state still has a running guest,
-// including one that is busy shutting down.
-func isPoweredOn(state VMState) bool {
-	return state == StateRunning || state == StateShuttingDown
-}
-
-// forceStopIfRunning powers the domain off unless it already stopped by itself.
-func forceStopIfRunning(domainName string) error {
-	if !isPoweredOn(State(domainName)) {
-		return nil
-	}
-	if err := ForceStop(domainName); err != nil {
-		return fmt.Errorf("cannot force-stop VM %s: %w", domainName, err)
-	}
-	return nil
-}
-
-// ForceStop immediately powers off a VM.
-func ForceStop(domainName string) error {
-	return libvirt.Virsh("destroy", domainName)
-}
-
-// Destroy stops a running VM and undefines its libvirt domain. It does not
-// remove the disk or seed ISO — call RemoveDisk and cloudinit.RemoveSeed
-// separately, because these files are created outside libvirt's storage pool
-// and virsh --remove-all-storage cannot manage them.
-func Destroy(domainName string) error {
-	state := State(domainName)
-	if state == StateRunning {
-		if err := ForceStop(domainName); err != nil {
-			ui.Printf("Warning: force-stop failed for %s: %v\n", domainName, err)
-		}
-	}
-
-	if err := libvirt.Virsh("undefine", domainName); err != nil {
-		return fmt.Errorf("cannot destroy VM %s: %w", domainName, err)
-	}
-	return nil
-}
-
 // RemoveDisk removes a VM's qcow2 disk via sudo. It is not an error if the
 // file does not exist (idempotent for destroy/cleanup).
 func RemoveDisk(diskPath string) error {
@@ -259,14 +153,6 @@ func RemoveDisk(diskPath string) error {
 		return fmt.Errorf("removing disk %s: %w", diskPath, err)
 	}
 	return nil
-}
-
-// Exists returns true if the VM domain is defined in libvirt.
-func Exists(domainName string) bool {
-	cmd := exec.Command("sudo", "virsh", "dominfo", domainName)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
 }
 
 // MACAddresses returns the lowercase MAC addresses of a domain's network
@@ -320,16 +206,6 @@ func parseLeaseIPv4(domifaddrOutput string) string {
 		}
 	}
 	return ""
-}
-
-// State returns the current state of a VM (running, shut off, etc).
-// Returns StateNotCreated if the VM doesn't exist.
-func State(domainName string) VMState {
-	out, err := exec.Command("sudo", "virsh", "domstate", domainName).Output()
-	if err != nil {
-		return StateNotCreated
-	}
-	return VMState(strings.TrimSpace(string(out)))
 }
 
 // checkDiskPathAvailable verifies that no file already exists at the target disk
