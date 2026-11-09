@@ -11,6 +11,9 @@
 #   vmherd down && vmherd up              (stop/restart without data loss)
 #   vmherd destroy
 
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+
 vms:
   - name: terramino
     image: ubuntu:noble

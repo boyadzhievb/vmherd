@@ -11,6 +11,9 @@ import (
 func TestLoadValidHerdfile(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: ctrl
     image: ubuntu:noble
@@ -75,6 +78,9 @@ ssh:
 func TestLoadDefaultValues(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: minimal
     image: debian:bookworm
@@ -130,6 +136,9 @@ func TestValidateNoVMs(t *testing.T) {
 func TestValidateDuplicateNames(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -148,6 +157,9 @@ vms:
 func TestValidateMissingImage(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: broken
 `
@@ -163,6 +175,9 @@ vms:
 func TestValidateBadImageFormat(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: broken
     image: ubuntu
@@ -179,6 +194,9 @@ vms:
 func TestDefaultSharedFolders(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -208,6 +226,9 @@ vms:
 func TestEmptySharedFoldersMeansNoShares(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -231,6 +252,9 @@ vms:
 func TestExplicitSharedFolders(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -261,6 +285,9 @@ vms:
 func TestSharedFolderRelativeGuestPath(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -280,6 +307,9 @@ vms:
 func TestPortForwardDefaults(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -313,6 +343,9 @@ vms:
 func TestPortForwardRefusesUDP(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -346,6 +379,9 @@ func TestPortForwardHostIP(t *testing.T) {
 	for _, testCase := range testCases {
 		dir := t.TempDir()
 		herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -376,6 +412,9 @@ vms:
 func TestPortForwardInvalidHostPort(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -395,6 +434,9 @@ vms:
 func TestPortForwardInvalidGuestPort(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -414,6 +456,9 @@ vms:
 func TestPortForwardInvalidProtocol(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -434,6 +479,9 @@ vms:
 func TestPortForwardDuplicateHostPort(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -492,6 +540,9 @@ func TestFilterVMs(t *testing.T) {
 func TestValidateVMNameSpecialChars(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: ";rm -rf /"
     image: ubuntu:noble
@@ -512,6 +563,9 @@ func TestValidateVMNameTooLong(t *testing.T) {
 	dir := t.TempDir()
 	longName := strings.Repeat("a", 64)
 	herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: %s
     image: ubuntu:noble
@@ -531,6 +585,9 @@ vms:
 func TestValidateVMNameStartsWithHyphen(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: -bad
     image: ubuntu:noble
@@ -553,6 +610,9 @@ func TestValidateVMNameValid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: %s
     image: ubuntu:noble
@@ -574,6 +634,9 @@ network:
 func TestValidateNetworkNameSpecialChars(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -596,6 +659,9 @@ network:
 func TestValidateIPAddressInvalid(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -620,6 +686,9 @@ network:
 func TestValidateIPAddressDuplicate(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -648,6 +717,9 @@ network:
 func TestValidateIPOutsideSubnet(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -681,6 +753,9 @@ func TestValidateDiskSizeInvalid(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			dir := t.TempDir()
 			herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -709,6 +784,9 @@ func TestValidateDiskSizeValid(t *testing.T) {
 		t.Run(size, func(t *testing.T) {
 			dir := t.TempDir()
 			herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -731,6 +809,9 @@ network:
 func TestValidateSharedFolderPathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -757,6 +838,9 @@ func TestValidateSharedFolderRelativeTraversal(t *testing.T) {
 	dir := t.TempDir()
 	// Use enough ../ segments to reach the filesystem root from any temp directory depth.
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -782,6 +866,9 @@ network:
 func TestValidateProvisionSourceAbsolute(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -808,6 +895,9 @@ network:
 func TestValidateProvisionSourceTraversal(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -848,6 +938,9 @@ func TestValidateSSHUserInvalid(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			dir := t.TempDir()
 			herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -877,6 +970,9 @@ func TestValidateSSHUserValid(t *testing.T) {
 		t.Run(user, func(t *testing.T) {
 			dir := t.TempDir()
 			herdfile := fmt.Sprintf(`
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -900,6 +996,9 @@ ssh:
 func TestValidateSubnetNon24Rejected(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -925,6 +1024,9 @@ network:
 func TestValidateIPInDHCPPoolRejected(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -949,6 +1051,9 @@ network:
 func TestValidateIPOutsideDHCPPoolAccepted(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -970,6 +1075,9 @@ network:
 func TestGatewayWithoutIPIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
@@ -987,6 +1095,9 @@ vms:
 func TestVMWithoutIPIsValid(t *testing.T) {
 	dir := t.TempDir()
 	herdfile := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble

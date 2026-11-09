@@ -13,6 +13,9 @@
 #   vmherd status
 #   vmherd destroy
 
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+
 vms:
   - name: redis
     image: ubuntu:noble

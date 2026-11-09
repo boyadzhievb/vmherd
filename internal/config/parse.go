@@ -166,10 +166,14 @@ func validate(herdfile *Herdfile, projectDir string) error {
 	usedIPs := make(map[string]string) // ip → vm name
 	for vmIndex, vmConfig := range herdfile.VMs {
 		problems = append(problems, validateVMIdentity(&vmConfig, vmIndex, usedNames)...)
+		problems = append(problems, validateVMResources(vmConfig)...)
 		if err := validateDiskSize(vmConfig.Disk, vmConfig.Name); err != nil {
 			problems = append(problems, err)
 		}
 		problems = append(problems, validateVMIPAddress(vmConfig, subnetCIDR, usedIPs)...)
+		if err := validateVMGateway(vmConfig, subnetCIDR); err != nil {
+			problems = append(problems, err)
+		}
 		// The Herdfile's VM shares SharedFolders' backing array with vmConfig,
 		// so the resolved host paths reach the Herdfile.
 		problems = append(problems, validateSharedFolders(vmConfig, projectDir)...)
@@ -177,7 +181,11 @@ func validate(herdfile *Herdfile, projectDir string) error {
 		problems = append(problems, validateProvisionSteps(vmConfig, projectDir)...)
 	}
 
+	problems = append(problems, validateImages(herdfile.Images, herdfile.VMs)...)
 	if err := validateNetworkName(herdfile.Network.Name); err != nil {
+		problems = append(problems, err)
+	}
+	if err := validateDNS(herdfile.Network.DNS); err != nil {
 		problems = append(problems, err)
 	}
 	if err := validateSSHUser(herdfile.SSH.User); err != nil {
@@ -205,8 +213,7 @@ func validateVMIdentity(vmConfig *VM, vmIndex int, usedNames map[string]bool) []
 	if vmConfig.Image == "" {
 		return append(problems, fmt.Errorf("VM %q must have an 'image' (e.g. ubuntu:noble)", vmConfig.Name))
 	}
-	distro, codename, found := strings.Cut(vmConfig.Image, ":")
-	if !found || distro == "" || codename == "" {
+	if !isDistroCodename(vmConfig.Image) {
 		problems = append(problems, fmt.Errorf("VM %q: image must be 'distro:codename' format (e.g. ubuntu:noble), got %q", vmConfig.Name, vmConfig.Image))
 	}
 	return problems
@@ -325,17 +332,18 @@ func validateSharedFolderGuest(vmName, guestPath string) error {
 	if guestPath == "" {
 		return fmt.Errorf("VM %q: shared_folders entry has empty 'guest' path", vmName)
 	}
-	if !strings.HasPrefix(guestPath, "/") {
-		return fmt.Errorf("VM %q: shared_folders guest path %q must be absolute (start with /)", vmName, guestPath)
+	if !isCleanGuestPath(guestPath) {
+		return fmt.Errorf("VM %q: shared_folders guest path %q must be absolute (start with /) without control characters", vmName, guestPath)
 	}
 	return nil
 }
 
-// validateProvisionSteps checks that every file-type provision source is
-// relative and does not escape the project directory.
+// validateProvisionSteps checks every provisioning step's type and keys, and
+// that every file step's source is relative and inside the project directory.
 func validateProvisionSteps(vmConfig VM, projectDir string) []error {
 	var problems []error
-	for _, step := range vmConfig.Provision {
+	for stepIndex, step := range vmConfig.Provision {
+		problems = append(problems, validateProvisionStep(vmConfig.Name, stepIndex+1, step)...)
 		if step.Type != ProvisionFile || step.Source == "" {
 			continue
 		}

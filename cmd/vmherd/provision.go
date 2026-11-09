@@ -87,9 +87,6 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 			if err := provisionFileStep(keyPath, sshUser, vmConfig, step, stepNumber, totalSteps); err != nil {
 				return err
 			}
-		default:
-			return fmt.Errorf("VM %q: unknown provisioning type %q in step %d — supported types: shell, file",
-				vmConfig.Name, step.Type, stepNumber)
 		}
 	}
 
@@ -100,11 +97,6 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 // provisionShellStep runs an inline shell script on the VM as root via SSH,
 // matching first-boot runcmd, which also runs as root.
 func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config.Provision, stepNumber, totalSteps int) error {
-	if step.Inline == "" {
-		ui.Printf("  step %d/%d: shell (empty, skipping)\n", stepNumber, totalSteps)
-		return nil
-	}
-
 	ui.Printf("  step %d/%d: shell...", stepNumber, totalSteps)
 
 	if err := ssh.RunScriptAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Inline); err != nil {
@@ -120,10 +112,6 @@ func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config
 // provisionedFileMode, the same result as first-boot write_files. It can
 // replace those files and write to root-owned destinations like /etc.
 func provisionFileStep(keyPath, sshUser string, vmConfig config.VM, step config.Provision, stepNumber, totalSteps int) error {
-	if step.Source == "" || step.Destination == "" {
-		return fmt.Errorf("VM %q: file provisioning step %d requires both 'source' and 'destination'", vmConfig.Name, stepNumber)
-	}
-
 	ui.Printf("  step %d/%d: file %s → %s...", stepNumber, totalSteps, step.Source, step.Destination)
 
 	if err := ssh.InstallFileAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Source, step.Destination, provisionedFileMode); err != nil {

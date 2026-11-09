@@ -36,6 +36,8 @@ func assertErrorMentions(t *testing.T, err error, fragments ...string) {
 // problems in different places are all reported, with a count.
 func TestLoadReportsAllValidationProblems(t *testing.T) {
 	err := loadHerdfileText(t, `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 vms:
   - name: web_1
     image: ubuntu:noble
@@ -111,6 +113,8 @@ func TestLoadReportsYAMLSyntaxError(t *testing.T) {
 // not repeated as "outside the subnet" for every VM with an ip.
 func TestLoadReportsBadSubnetOnce(t *testing.T) {
 	err := loadHerdfileText(t, `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 vms:
   - name: web
     image: ubuntu:noble
@@ -135,6 +139,8 @@ network:
 // called by its position and its other problems are still reported.
 func TestLoadReportsUnnamedVMsOtherProblems(t *testing.T) {
 	err := loadHerdfileText(t, `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 vms:
   - name: web
     image: ubuntu:noble
@@ -152,6 +158,8 @@ vms:
 // every bad entry, not just the first.
 func TestLoadReportsEveryBadPortAndShare(t *testing.T) {
 	err := loadHerdfileText(t, `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 vms:
   - name: web
     image: ubuntu:noble

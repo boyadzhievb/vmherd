@@ -45,13 +45,13 @@ func buildRuncmdLines(provisions []config.Provision, sshUser string, sharedMount
 	return runcmdLines
 }
 
-// provisionStepLines returns one guarded runcmd line per non-empty shell step.
-// Steps are numbered by their position among all provisioning steps, as
-// 'vmherd provision' numbers them.
+// provisionStepLines returns one guarded runcmd line per shell step (Herdfile
+// validation rejects empty ones). Steps are numbered by their position among
+// all provisioning steps, as 'vmherd provision' numbers them.
 func provisionStepLines(provisions []config.Provision) []string {
 	var stepLines []string
 	for stepIndex, step := range provisions {
-		if step.Type != config.ProvisionShell || strings.TrimSpace(step.Inline) == "" {
+		if step.Type != config.ProvisionShell {
 			continue
 		}
 		stepLabel := fmt.Sprintf("%d of %d", stepIndex+1, len(provisions))
@@ -83,15 +83,21 @@ func bashCommandLine(script string) string {
 	return "/bin/bash -c " + quoteForShell(strings.TrimSpace(script))
 }
 
-// writeRuncmdSection appends the runcmd section to user-data. The lines are
-// YAML-encoded by yaml.v3, so no shell text can break out of its list entry.
+// writeRuncmdSection appends the runcmd section to user-data.
 func writeRuncmdSection(builder *strings.Builder, runcmdLines []string) error {
-	if len(runcmdLines) == 0 {
+	return writeYAMLSection(builder, "runcmd", runcmdLines)
+}
+
+// writeYAMLSection appends "<key>:" with entries to user-data, YAML-encoded by
+// yaml.v3 so no value can break out of its entry. Nothing is written when
+// entries is empty.
+func writeYAMLSection[Entry any](builder *strings.Builder, key string, entries []Entry) error {
+	if len(entries) == 0 {
 		return nil
 	}
-	encodedSection, err := yaml.Marshal(map[string][]string{"runcmd": runcmdLines})
+	encodedSection, err := yaml.Marshal(map[string][]Entry{key: entries})
 	if err != nil {
-		return fmt.Errorf("encoding cloud-init runcmd section: %w", err)
+		return fmt.Errorf("encoding cloud-init %s section: %w", key, err)
 	}
 	builder.Write(encodedSection)
 	return nil

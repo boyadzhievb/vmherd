@@ -234,11 +234,8 @@ func TestGenerateFilesWithFileProvisioning(t *testing.T) {
 	if !strings.Contains(content, "encoding: b64") {
 		t.Error("user-data missing base64 encoding marker")
 	}
-	if !strings.Contains(content, "permissions: '0644'") {
-		t.Error("user-data should set write_files permissions to 0644")
-	}
-	if strings.Contains(content, "permissions: '0755'") {
-		t.Error("user-data should not use overly permissive 0755 for write_files")
+	if writeFiles := readWriteFiles(t, files.UserData); len(writeFiles) != 1 || writeFiles[0].Permissions != "0644" {
+		t.Errorf("write_files permissions must be the string 0644, got %+v", writeFiles)
 	}
 }
 
@@ -293,7 +290,6 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 	expectedFragments := []string{
 		"runcmd:",
 		"mounts:",
-		`  - [vmherd_share_0, /vagrant, 9p, "trans=virtio,version=9p2000.L,noatime,nofail", "0", "0"]`,
 		"  - name: vmherd\n    uid: 1001\n",
 	}
 
@@ -305,6 +301,10 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 	assertRuncmdHasLines(t, files.UserData,
 		bashCommandLine("mkdir -p '/vagrant'"),
 		bashCommandLine("mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'"))
+	wantMount := []string{"vmherd_share_0", "/vagrant", "9p", "trans=virtio,version=9p2000.L,noatime,nofail", "0", "0"}
+	if mounts := readMounts(t, files.UserData); len(mounts) != 1 || !slices.Equal(mounts[0], wantMount) {
+		t.Errorf("mounts = %q, want [%q]", mounts, wantMount)
+	}
 }
 
 // TestGenerateFilesWithCombinedProvisioning verifies that both shell and file provisioning steps coexist in user-data.
@@ -806,20 +806,43 @@ func TestSharedMountRuncmdsQuoteGuestPath(t *testing.T) {
 	}
 }
 
-// readRuncmdLines decodes the user-data file and returns its runcmd entries.
-func readRuncmdLines(t *testing.T, userDataPath string) []string {
+// decodedUserData holds the user-data sections the tests inspect.
+type decodedUserData struct {
+	Runcmd     []string         `yaml:"runcmd"`      // runcmd script lines
+	Mounts     [][]string       `yaml:"mounts"`      // fstab-style mount entries
+	WriteFiles []writeFileEntry `yaml:"write_files"` // file provisioning entries
+}
+
+// decodeUserData parses the user-data file as YAML.
+func decodeUserData(t *testing.T, userDataPath string) decodedUserData {
 	t.Helper()
 	userData, err := os.ReadFile(userDataPath)
 	if err != nil {
 		t.Fatalf("cannot read user-data: %v", err)
 	}
-	var cloudConfig struct {
-		Runcmd []string `yaml:"runcmd"`
-	}
+	var cloudConfig decodedUserData
 	if err := yaml.Unmarshal(userData, &cloudConfig); err != nil {
 		t.Fatalf("user-data is not valid YAML: %v\n%s", err, userData)
 	}
-	return cloudConfig.Runcmd
+	return cloudConfig
+}
+
+// readRuncmdLines decodes the user-data file and returns its runcmd entries.
+func readRuncmdLines(t *testing.T, userDataPath string) []string {
+	t.Helper()
+	return decodeUserData(t, userDataPath).Runcmd
+}
+
+// readMounts decodes the user-data file and returns its mounts entries.
+func readMounts(t *testing.T, userDataPath string) [][]string {
+	t.Helper()
+	return decodeUserData(t, userDataPath).Mounts
+}
+
+// readWriteFiles decodes the user-data file and returns its write_files entries.
+func readWriteFiles(t *testing.T, userDataPath string) []writeFileEntry {
+	t.Helper()
+	return decodeUserData(t, userDataPath).WriteFiles
 }
 
 // assertRuncmdHasLines fails the test unless every wanted line is one of the
@@ -831,5 +854,35 @@ func assertRuncmdHasLines(t *testing.T, userDataPath string, wantedLines ...stri
 		if !slices.Contains(runcmdLines, wantedLine) {
 			t.Errorf("runcmd has no entry %q; entries:\n%s", wantedLine, strings.Join(runcmdLines, "\n"))
 		}
+	}
+}
+
+// TestYAMLSpecialCharactersInPaths checks that guest paths and destinations
+// with YAML-special characters decode back unchanged (they used to be written
+// with a raw %s, so ", " or "]" broke the mounts and write_files entries).
+func TestYAMLSpecialCharactersInPaths(t *testing.T) {
+	trickyPath := "/srv/a, b]: #c 'd\" e"
+	sourceFile := filepath.Join(t.TempDir(), "setup.sh")
+	if err := os.WriteFile(sourceFile, []byte("echo hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vmConfig := config.VM{
+		Name:      "tricky",
+		Image:     "ubuntu:noble",
+		Network:   config.VMNetworkConfig{IP: "10.0.0.5"},
+		Provision: []config.Provision{{Type: config.ProvisionFile, Source: sourceFile, Destination: trickyPath}},
+	}
+	sharedMounts := []SharedMount{{MountTag: "vmherd_share_0", GuestPath: trickyPath}}
+
+	files, err := GenerateFiles(t.TempDir(), vmConfig, "vmherd", "", "ssh-ed25519 AAAA key", "10.0.0", "1.1.1.1", "52:54:00:aa:bb:cc", sharedMounts, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	userData := decodeUserData(t, files.UserData)
+	if len(userData.Mounts) != 1 || userData.Mounts[0][1] != trickyPath {
+		t.Errorf("mount point = %q, want %q", userData.Mounts, trickyPath)
+	}
+	if len(userData.WriteFiles) != 1 || userData.WriteFiles[0].Path != trickyPath {
+		t.Errorf("write_files path = %+v, want %q", userData.WriteFiles, trickyPath)
 	}
 }

@@ -94,37 +94,49 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 	if err := writeRuncmdSection(&builder, buildRuncmdLines(vm.Provision, sshUser, sharedMounts)); err != nil {
 		return err
 	}
-	writeMountsEntries(&builder, sharedMounts)
+	if err := writeMountsEntries(&builder, sharedMounts); err != nil {
+		return err
+	}
 
 	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o600)
 }
 
-// writeProvisionFiles appends cloud-init write_files entries for file
-// provisioning steps. Shell steps go to runcmd (see buildRuncmdLines).
-func writeProvisionFiles(builder *strings.Builder, provisions []config.Provision) error {
-	var writeFiles []config.Provision
-	for _, step := range provisions {
-		if step.Type == config.ProvisionFile {
-			writeFiles = append(writeFiles, step)
-		}
-	}
-	if len(writeFiles) == 0 {
-		return nil
-	}
+// writeFileEntry is one cloud-init write_files entry for a file provisioning step.
+type writeFileEntry struct {
+	Path        string `yaml:"path"`        // absolute destination in the guest
+	Encoding    string `yaml:"encoding"`    // always b64, so any file content is safe
+	Content     string `yaml:"content"`     // base64 of the source file
+	Permissions string `yaml:"permissions"` // octal mode string, e.g. '0644'
+}
 
-	builder.WriteString("write_files:\n")
-	for _, wf := range writeFiles {
-		content, err := os.ReadFile(wf.Source)
-		if err != nil {
-			return fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
+// provisionedFileEncoding and provisionedFilePermissions are the write_files
+// encoding and mode of first-boot file steps.
+const (
+	provisionedFileEncoding    = "b64"
+	provisionedFilePermissions = "0644"
+)
+
+// writeProvisionFiles appends cloud-init write_files entries for file
+// provisioning steps, YAML-encoded by yaml.v3 so no path can break out of its
+// entry. Shell steps go to runcmd (see buildRuncmdLines).
+func writeProvisionFiles(builder *strings.Builder, provisions []config.Provision) error {
+	var writeFiles []writeFileEntry
+	for _, step := range provisions {
+		if step.Type != config.ProvisionFile {
+			continue
 		}
-		encoded := base64.StdEncoding.EncodeToString(content)
-		fmt.Fprintf(builder, "  - path: %s\n", wf.Destination)
-		builder.WriteString("    encoding: b64\n")
-		fmt.Fprintf(builder, "    content: %s\n", encoded)
-		builder.WriteString("    permissions: '0644'\n")
+		content, err := os.ReadFile(step.Source)
+		if err != nil {
+			return fmt.Errorf("cannot read provisioning file %s: %w", step.Source, err)
+		}
+		writeFiles = append(writeFiles, writeFileEntry{
+			Path:        step.Destination,
+			Encoding:    provisionedFileEncoding,
+			Content:     base64.StdEncoding.EncodeToString(content),
+			Permissions: provisionedFilePermissions,
+		})
 	}
-	return nil
+	return writeYAMLSection(builder, "write_files", writeFiles)
 }
 
 // homeOwnershipCommand returns a runcmd that gives the SSH user its home
@@ -154,16 +166,15 @@ func sharedMountRuncmds(sharedMounts []SharedMount) []string {
 	return runcmds
 }
 
-// writeMountsEntries appends the cloud-init mounts section (fstab entries)
-// for 9p shared folders.
-func writeMountsEntries(builder *strings.Builder, sharedMounts []SharedMount) {
-	if len(sharedMounts) == 0 {
-		return
-	}
-	builder.WriteString("mounts:\n")
+// writeMountsEntries appends the cloud-init mounts section (fstab entries:
+// device, mount point, type, options, dump, pass), YAML-encoded by yaml.v3 so
+// no guest path can break out of its entry.
+func writeMountsEntries(builder *strings.Builder, sharedMounts []SharedMount) error {
+	mountEntries := make([][]string, 0, len(sharedMounts))
 	for _, mount := range sharedMounts {
-		fmt.Fprintf(builder, "  - [%s, %s, 9p, \"%s\", \"0\", \"0\"]\n", mount.MountTag, mount.GuestPath, sharedMountOptions)
+		mountEntries = append(mountEntries, []string{mount.MountTag, mount.GuestPath, "9p", sharedMountOptions, "0", "0"})
 	}
+	return writeYAMLSection(builder, "mounts", mountEntries)
 }
 
 // quoteForShell wraps value in single quotes for a POSIX shell. Each embedded

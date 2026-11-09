@@ -102,6 +102,9 @@ func TestResolveSharedFolderHostPathRejectsProjectAtHome(t *testing.T) {
 func TestLoadRecordsResolvedSharedFolderHost(t *testing.T) {
 	fixture := newSharedPathFixture(t)
 	herdfileContent := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+  debian:bookworm: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 vms:
   - name: web
     image: ubuntu:noble
