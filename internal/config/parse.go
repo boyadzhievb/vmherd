@@ -347,16 +347,40 @@ func validateProvisionSteps(vmConfig VM, projectDir string) []error {
 		if step.Type != ProvisionFile || step.Source == "" {
 			continue
 		}
-		if filepath.IsAbs(step.Source) {
-			problems = append(problems, fmt.Errorf("VM %q: provision source %q must be a relative path — use a path relative to your project directory", vmConfig.Name, step.Source))
-			continue
-		}
-		cleanPath := filepath.Clean(filepath.Join(projectDir, step.Source))
-		if !strings.HasPrefix(cleanPath, projectDir) {
-			problems = append(problems, fmt.Errorf("VM %q: provision source %q escapes project directory — provision files must be inside the project", vmConfig.Name, step.Source))
+		if err := checkProvisionSourceInsideProject(step.Source, projectDir); err != nil {
+			problems = append(problems, fmt.Errorf("VM %q: provision source %q %w", vmConfig.Name, step.Source, err))
 		}
 	}
 	return problems
+}
+
+// checkProvisionSourceInsideProject checks that a file step's source is a
+// relative path that, with symlinks resolved, lies below the project
+// directory. A missing file passes here; 'up' and 'provision' report it.
+func checkProvisionSourceInsideProject(source, projectDir string) error {
+	if filepath.IsAbs(source) {
+		return fmt.Errorf("must be a relative path — use a path relative to your project directory")
+	}
+	sourcePath := filepath.Join(projectDir, source)
+	resolvedProjectDir, err := resolveSymlinksAllowMissing(projectDir)
+	if err != nil {
+		return fmt.Errorf("cannot be checked: %w", err)
+	}
+	resolvedSourcePath, err := resolveSymlinksAllowMissing(sourcePath)
+	if err != nil {
+		return fmt.Errorf("cannot be checked: %w", err)
+	}
+	// isPathWithin compares whole path components, so /proj-evil is not
+	// inside /proj.
+	switch {
+	case !isPathWithin(filepath.Clean(sourcePath), filepath.Clean(projectDir)):
+		return fmt.Errorf("escapes project directory — provision files must be inside the project")
+	case resolvedSourcePath == resolvedProjectDir:
+		return fmt.Errorf("is the project directory itself — name the file to copy")
+	case !isPathWithin(resolvedSourcePath, resolvedProjectDir):
+		return fmt.Errorf("is a symlink to %q, outside the project directory — provision files must be inside the project", resolvedSourcePath)
+	}
+	return nil
 }
 
 // validatePortForwards checks every port forward's ranges, protocol and host
