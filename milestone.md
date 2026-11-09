@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 17 | 9 |
+| M1 | Correctness of existing features | 17 | 10 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -215,11 +215,12 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 1C — Herdfile validation
 
-- [ ] **M1.9 — Strict YAML and collect all validation errors** · Med
+- [x] **M1.9 — Strict YAML and collect all validation errors** · Med
   - **Files:** `internal/config/parse.go:52-175`
   - **Problem:** Unknown keys (`memroy:`) are silently ignored. Validation stops at the first error, while CLAUDE.md requires reporting all of them.
   - **Fix:** Use `yaml.NewDecoder` with `KnownFields(true)`. Have `validate` collect errors into a slice and return `errors.Join`.
   - **Done when:** A test Herdfile with three distinct errors reports all three, and an unknown key is reported with its line number.
+  - **Result (2026-11-09):** `Load` decodes with `yaml.NewDecoder` + `KnownFields(true)`. yaml.v3 already collects every unknown key and type mismatch with its line; the new `internal/config/yamlerrors.go` rewrites them in Herdfile terms: `line 4: unknown key 'memroy' in a VM (under 'vms:') — did you mean 'memory'?` (closest known key within 2 edits, Damerau-Levenshtein so a swap counts 1), or `— known keys there: password, user` when nothing is close; the keys come from the struct's yaml tags, so the list can't go stale. Type errors read `line 4: 'two' is text, but this key needs a whole number`. An empty Herdfile says so (was a bare `EOF`). When decoding fails, semantic validation is skipped (half-decoded zero values would add misleading problems). `validate` and its helpers now run every check and collect all problems: one problem is reported as `Herdfile: <problem>`, several as `Herdfile has N problems:` with one per line. Shares, ports and provision steps report every bad entry; a VM without a name is called `#<position>` so its other problems are still reported; a bad subnet is reported once and the per-VM in-subnet checks are skipped (`validateSubnetPrefix` → `parseSubnet`, returning the parsed subnet). Message texts are unchanged otherwise; new range/format checks stay M1.10, the source-escape bug M1.11. The two acceptance Herdfiles, the `vmherd init` template and the README example all decode strictly; collecting all problems showed the README example's VM IPs (192.168.122.x) were outside its own subnet (192.168.150.0/24) — fixed. Tests (`internal/config/problems_test.go`): three distinct problems all reported with a count; five unknown keys at different levels with line numbers, suggestions and the known-keys list; three type mismatches; empty file; YAML syntax error; bad subnet not repeated per VM; unnamed VM; every bad share/port entry; edit distance and suggestion cut-off. Verified on .71: `memroy` in the M1.17 project's Herdfile → `line 31: unknown key 'memroy' … did you mean 'memory'?`, exit 1; after fixing it, a bad port and ssh user are reported together as 2 problems; the restored Herdfile works.
 
 - [ ] **M1.10 — Range, enum and format checks for every field** · Med
   - **Files:** `internal/config/parse.go`, `internal/config/config.go`

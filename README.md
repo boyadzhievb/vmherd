@@ -94,7 +94,7 @@ vms:
     memory: 4096
     disk: 20G
     network:
-      ip: 192.168.122.10
+      ip: 192.168.150.10
     shared_folders:
       - host: .
         guest: /vagrant
@@ -115,7 +115,7 @@ vms:
     memory: 2048
     disk: 20G
     network:
-      ip: 192.168.122.20
+      ip: 192.168.150.20
 
 network:
   name: vmherd-myproject-1a2b3c4d   # vmherd init picks a project-unique name
