@@ -3,7 +3,6 @@
 package internal
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,7 +91,6 @@ func TestFullVMLifecycle(t *testing.T) {
 	if err := cloudinit.BuildAndInstallSeed(ciFiles, seedPath); err != nil {
 		t.Fatalf("cannot build seed ISO: %v", err)
 	}
-	t.Cleanup(func() { cloudinit.RemoveSeed(seedPath) })
 
 	if err := vm.Create(vm.CreateOptions{
 		VMName:      vmConfig.Name,
@@ -132,6 +130,11 @@ func TestFullVMLifecycle(t *testing.T) {
 	if err := vm.Destroy(testDomainName); err != nil {
 		t.Fatalf("cannot destroy VM: %v", err)
 	}
+	// Destroy keeps the disk (no --remove-all-storage since M1.17), as the
+	// CLI does; remove it the same way 'vmherd destroy' does.
+	if err := vm.RemoveDisk(diskPath); err != nil {
+		t.Fatalf("cannot remove disk: %v", err)
+	}
 
 	if state, err := vm.State(testDomainName); err != nil || state != vm.StateNotCreated {
 		t.Errorf("VM should not exist after destroy: state %q, error %v", state, err)
@@ -144,14 +147,24 @@ func TestFullVMLifecycle(t *testing.T) {
 	t.Log("Network destroyed")
 }
 
-// cleanup removes any leftover test resources from a previous failed run.
+// cleanup removes any leftover test resources from a previous failed run:
+// domain, network, disk and seed ISO. The disk and seed are root-owned, so
+// they go through the sudo helpers; missing files are not an error.
 func cleanup(t *testing.T) {
 	t.Helper()
 	if state, err := vm.State(testDomainName); err == nil && state != vm.StateNotCreated {
 		// Destroy forces an active domain off before undefining it.
-		_ = vm.Destroy(testDomainName)
+		if err := vm.Destroy(testDomainName); err != nil {
+			t.Logf("cleanup: %v", err)
+		}
 	}
-	_ = network.Destroy(testNetworkName)
-	diskPath := filepath.Join(testDiskDir, testDomainName+".qcow2")
-	_ = os.Remove(diskPath)
+	if err := network.Destroy(testNetworkName); err != nil {
+		t.Logf("cleanup: network %s: %v", testNetworkName, err)
+	}
+	if err := vm.RemoveDisk(filepath.Join(testDiskDir, testDomainName+".qcow2")); err != nil {
+		t.Logf("cleanup: %v", err)
+	}
+	if err := cloudinit.RemoveSeed(filepath.Join(testDiskDir, testDomainName+"-seed.iso")); err != nil {
+		t.Logf("cleanup: %v", err)
+	}
 }
