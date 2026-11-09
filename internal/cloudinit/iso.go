@@ -67,7 +67,7 @@ func buildISO9660(volumeLabel string, files []isoFile) ([]byte, error) {
 	now := time.Now().UTC()
 
 	pathTableSector := uint32(isoSystemAreaSectors + 2) // sector 18
-	rootDirSector := pathTableSector + 1                 // sector 19
+	rootDirSector := pathTableSector + 1                // sector 19
 
 	rootDirData := buildRootDirectory(files, rootDirSector, now)
 	rootDirSectors := sectorsNeeded(len(rootDirData))
@@ -151,12 +151,12 @@ func writePrimaryVolumeDescriptor(buf *bytes.Buffer, volumeLabel string,
 	copy(sector[1:6], isoStandardIdentifier[:])
 	sector[6] = isoVolumeDescriptorVersion
 
-	writeStrA(sector[8:40], "")             // system identifier
-	writeStrD(sector[40:72], volumeLabel)    // volume identifier
+	writeStrA(sector[8:40], "")                    // system identifier
+	writeStrD(sector[40:72], volumeLabel)          // volume identifier
 	writeBothEndian32(sector[80:88], totalSectors) // volume space size
 
-	writeBothEndian16(sector[120:124], 1) // volume set size
-	writeBothEndian16(sector[124:128], 1) // volume sequence number
+	writeBothEndian16(sector[120:124], 1)             // volume set size
+	writeBothEndian16(sector[124:128], 1)             // volume sequence number
 	writeBothEndian16(sector[128:132], isoSectorSize) // logical block size
 
 	writeBothEndian32(sector[132:140], pathTableSize)
@@ -374,10 +374,10 @@ func buildRockRidgeFileEntries(realName string) []byte {
 	pxEntry[1] = rockRidgeSignaturePX[1]
 	pxEntry[2] = 36
 	pxEntry[3] = rockRidgeVersion
-	writeBothEndian32(pxEntry[4:12], 0o100644)  // file mode
-	writeBothEndian32(pxEntry[12:20], 1)         // number of links
-	writeBothEndian32(pxEntry[20:28], 0)         // uid
-	writeBothEndian32(pxEntry[28:36], 0)         // gid
+	writeBothEndian32(pxEntry[4:12], 0o100644) // file mode
+	writeBothEndian32(pxEntry[12:20], 1)       // number of links
+	writeBothEndian32(pxEntry[20:28], 0)       // uid
+	writeBothEndian32(pxEntry[28:36], 0)       // gid
 	entries.Write(pxEntry[:])
 
 	// NM entry: alternate name preserving case and hyphens
@@ -403,8 +403,8 @@ func buildPathTable(rootDirSector uint32) []byte {
 	entry[1] = 0 // extended attribute record length
 	binary.LittleEndian.PutUint32(entry[2:6], rootDirSector)
 	binary.LittleEndian.PutUint16(entry[6:8], 1) // parent directory number
-	entry[8] = 0x00                               // root directory identifier
-	entry[9] = 0                                  // padding
+	entry[8] = 0x00                              // root directory identifier
+	entry[9] = 0                                 // padding
 	return entry
 }
 

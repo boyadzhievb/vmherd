@@ -14,20 +14,20 @@ const qemuGuestAgentChannel = "org.qemu.guest_agent.0"
 
 // domainXML is the root element of a libvirt domain definition.
 type domainXML struct {
-	XMLName     xml.Name          `xml:"domain"`
-	Type        string            `xml:"type,attr"`
-	Name        string            `xml:"name"`
-	Memory      domainMemory      `xml:"memory"`
-	VCPU        domainVCPU        `xml:"vcpu"`
-	OS          domainOS          `xml:"os"`
-	Features    domainFeatures    `xml:"features"`
-	CPU         domainCPU         `xml:"cpu"`
-	Clock       domainClock       `xml:"clock"`
-	OnPoweroff  string            `xml:"on_poweroff"`
-	OnReboot    string            `xml:"on_reboot"`
-	OnCrash     string            `xml:"on_crash"`
-	Devices     domainDevices     `xml:"devices"`
-	SecLabels   []domainSecLabel  `xml:"seclabel,omitempty"`
+	XMLName    xml.Name         `xml:"domain"`
+	Type       string           `xml:"type,attr"`
+	Name       string           `xml:"name"`
+	Memory     domainMemory     `xml:"memory"`
+	VCPU       domainVCPU       `xml:"vcpu"`
+	OS         domainOS         `xml:"os"`
+	Features   domainFeatures   `xml:"features"`
+	CPU        domainCPU        `xml:"cpu"`
+	Clock      domainClock      `xml:"clock"`
+	OnPoweroff string           `xml:"on_poweroff"`
+	OnReboot   string           `xml:"on_reboot"`
+	OnCrash    string           `xml:"on_crash"`
+	Devices    domainDevices    `xml:"devices"`
+	SecLabels  []domainSecLabel `xml:"seclabel,omitempty"`
 }
 
 // domainMemory specifies the maximum memory for the domain.
@@ -87,8 +87,8 @@ type domainDevices struct {
 
 // domainDisk describes a block device attached to the domain.
 type domainDisk struct {
-	Type   string          `xml:"type,attr"`
-	Device string          `xml:"device,attr"`
+	Type   string           `xml:"type,attr"`
+	Device string           `xml:"device,attr"`
 	Driver domainDiskDriver `xml:"driver"`
 	Source domainDiskSource `xml:"source"`
 	Target domainDiskTarget `xml:"target"`
@@ -142,9 +142,9 @@ type domainInterfaceModel struct {
 
 // domainSerial describes a serial port.
 type domainSerial struct {
-	Type   string             `xml:"type,attr"`
+	Type   string              `xml:"type,attr"`
 	Source *domainSerialSource `xml:"source,omitempty"`
-	Target domainSerialTarget `xml:"target"`
+	Target domainSerialTarget  `xml:"target"`
 }
 
 // domainSerialSource specifies the host-side backing for a serial port.
@@ -195,8 +195,8 @@ type domainGraphics struct {
 
 // domainRNG describes a virtio random number generator.
 type domainRNG struct {
-	Model   string         `xml:"model,attr"`
-	Backend domainRNGBack  `xml:"backend"`
+	Model   string        `xml:"model,attr"`
+	Backend domainRNGBack `xml:"backend"`
 }
 
 // domainRNGBack specifies the host entropy source for the RNG.
@@ -212,10 +212,10 @@ type domainMemballoon struct {
 
 // domainFilesystem describes a host-to-guest filesystem passthrough (9p).
 type domainFilesystem struct {
-	Type       string                   `xml:"type,attr"`
-	AccessMode string                   `xml:"accessmode,attr"`
-	Source     domainFilesystemSource   `xml:"source"`
-	Target     domainFilesystemTarget   `xml:"target"`
+	Type       string                 `xml:"type,attr"`
+	AccessMode string                 `xml:"accessmode,attr"`
+	Source     domainFilesystemSource `xml:"source"`
+	Target     domainFilesystemTarget `xml:"target"`
 }
 
 // domainFilesystemSource identifies the host directory.
