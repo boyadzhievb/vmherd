@@ -10,14 +10,28 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// waitForVMsReady waits for each started VM's address and SSH, then starts
-// its port forwarding. It returns the VMs that answered SSH and the joined
-// errors of every VM that didn't get there or whose port forwarding failed.
-func waitForVMsReady(project *config.Project, vms []config.VM, keyPath string) ([]config.VM, error) {
+// waitForVMsReady waits for each started VM's address and SSH, then (for the
+// VMs in firstBootVMNames only) for first-boot provisioning, and starts port
+// forwarding for every VM that answered SSH. It returns the VMs that are ready
+// and the joined errors of every VM that didn't get there.
+func waitForVMsReady(project *config.Project, vms []config.VM, keyPath string, firstBootVMNames map[string]bool) ([]config.VM, error) {
 	addressedVMs, leaseErr := waitForAddresses(project, vms)
-	readyVMs, sshErr := waitForSSHInParallel(addressedVMs, keyPath, project.Herdfile.SSH.User)
-	portForwardErr := startPortForwardingForVMs(project, readyVMs)
-	return readyVMs, errors.Join(leaseErr, sshErr, portForwardErr)
+	reachableVMs, sshErr := waitForSSHInParallel(addressedVMs, keyPath, project.Herdfile.SSH.User)
+
+	var firstBootVMs, readyVMs []config.VM
+	for _, vmConfig := range reachableVMs {
+		if firstBootVMNames[vmConfig.Name] {
+			firstBootVMs = append(firstBootVMs, vmConfig)
+		} else {
+			readyVMs = append(readyVMs, vmConfig)
+		}
+	}
+	provisionedVMs, provisionErr := waitForFirstBootProvisioning(firstBootVMs, keyPath, project.Herdfile.SSH.User)
+	readyVMs = append(readyVMs, provisionedVMs...)
+
+	// A VM whose provisioning failed still runs, so its ports are forwarded.
+	portForwardErr := startPortForwardingForVMs(project, reachableVMs)
+	return readyVMs, errors.Join(leaseErr, sshErr, provisionErr, portForwardErr)
 }
 
 // waitForSSHInParallel waits for SSH on all VMs concurrently and prints one

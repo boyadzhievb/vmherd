@@ -43,7 +43,8 @@ Examples:
 			if err != nil {
 				return err
 			}
-			_, readyErr := waitForVMsReady(project, restartedVMs, keyPath)
+			// Restarted VMs keep their disk, so first-boot provisioning ran long ago.
+			_, readyErr := waitForVMsReady(project, restartedVMs, keyPath, nil)
 			if err := incompleteCommandError("restart", errors.Join(restartErr, readyErr)); err != nil {
 				return err
 			}

@@ -85,57 +85,46 @@ func writeUserData(seedDir string, vm config.VM, sshUser, userPassword, sshPubKe
 	builder.WriteString("package_update: false\n")
 	builder.WriteString("package_upgrade: false\n")
 
-	provisionRuncmds, err := writeProvisionFiles(&builder, vm.Provision)
-	if err != nil {
+	if err := writeProvisionFiles(&builder, vm.Provision); err != nil {
 		return err
 	}
 
 	// Order matters: the home fix must run before provisioning uses ~, and the
-	// share fallback mounts come last.
-	var runcmds []string
-	if len(sharedMounts) > 0 {
-		runcmds = append(runcmds, homeOwnershipCommand(sshUser))
+	// share fallback mounts come after provisioning (see buildRuncmdLines).
+	if err := writeRuncmdSection(&builder, buildRuncmdLines(vm.Provision, sshUser, sharedMounts)); err != nil {
+		return err
 	}
-	runcmds = append(runcmds, provisionRuncmds...)
-	runcmds = append(runcmds, sharedMountRuncmds(sharedMounts)...)
-	writeRuncmdEntries(&builder, runcmds)
 	writeMountsEntries(&builder, sharedMounts)
 
 	return os.WriteFile(filepath.Join(seedDir, "user-data"), []byte(builder.String()), 0o600)
 }
 
 // writeProvisionFiles appends cloud-init write_files entries for file
-// provisioning steps and returns the shell steps' scripts for runcmd.
-func writeProvisionFiles(builder *strings.Builder, provisions []config.Provision) ([]string, error) {
-	var runcmds []string
+// provisioning steps. Shell steps go to runcmd (see buildRuncmdLines).
+func writeProvisionFiles(builder *strings.Builder, provisions []config.Provision) error {
 	var writeFiles []config.Provision
-
 	for _, step := range provisions {
-		switch step.Type {
-		case config.ProvisionShell:
-			if step.Inline != "" {
-				runcmds = append(runcmds, step.Inline)
-			}
-		case config.ProvisionFile:
+		if step.Type == config.ProvisionFile {
 			writeFiles = append(writeFiles, step)
 		}
 	}
-
-	if len(writeFiles) > 0 {
-		builder.WriteString("write_files:\n")
-		for _, wf := range writeFiles {
-			content, err := os.ReadFile(wf.Source)
-			if err != nil {
-				return nil, fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
-			}
-			encoded := base64.StdEncoding.EncodeToString(content)
-			fmt.Fprintf(builder, "  - path: %s\n", wf.Destination)
-			builder.WriteString("    encoding: b64\n")
-			fmt.Fprintf(builder, "    content: %s\n", encoded)
-			builder.WriteString("    permissions: '0644'\n")
-		}
+	if len(writeFiles) == 0 {
+		return nil
 	}
-	return runcmds, nil
+
+	builder.WriteString("write_files:\n")
+	for _, wf := range writeFiles {
+		content, err := os.ReadFile(wf.Source)
+		if err != nil {
+			return fmt.Errorf("cannot read provisioning file %s: %w", wf.Source, err)
+		}
+		encoded := base64.StdEncoding.EncodeToString(content)
+		fmt.Fprintf(builder, "  - path: %s\n", wf.Destination)
+		builder.WriteString("    encoding: b64\n")
+		fmt.Fprintf(builder, "    content: %s\n", encoded)
+		builder.WriteString("    permissions: '0644'\n")
+	}
+	return nil
 }
 
 // homeOwnershipCommand returns a runcmd that gives the SSH user its home
@@ -146,24 +135,12 @@ func homeOwnershipCommand(sshUser string) string {
 	return fmt.Sprintf(`chown %s: "$(getent passwd %s | cut -d: -f6)"`, sshUser, sshUser)
 }
 
-// writeRuncmdEntries appends the cloud-init runcmd section, one bash -c entry per command.
-func writeRuncmdEntries(builder *strings.Builder, runcmds []string) {
-	if len(runcmds) == 0 {
-		return
-	}
-	builder.WriteString("runcmd:\n")
-	for _, cmd := range runcmds {
-		trimmedCommand := strings.TrimSpace(cmd)
-		fmt.Fprintf(builder, "  - [\"/bin/bash\", \"-c\", %q]\n", trimmedCommand)
-	}
-}
-
 // sharedMountOptions are the guest mount options for 9p shared folders. nofail
 // keeps the guest booting if a share is missing; noatime avoids a host write on
 // every read.
 const sharedMountOptions = "trans=virtio,version=9p2000.L,noatime,nofail"
 
-// sharedMountRuncmds returns runcmd entries that create each share's mount
+// sharedMountRuncmds returns the commands that create each share's mount
 // point and mount it if the mounts module didn't already (a second mount
 // would fail and mark the whole cloud-init run as failed).
 func sharedMountRuncmds(sharedMounts []SharedMount) []string {

@@ -77,7 +77,11 @@ Examples:
 				recreatedVMs = append(recreatedVMs, vmConfig)
 			}
 
-			_, readyErr := waitForVMsReady(project, recreatedVMs, keyPath)
+			recreatedVMNames := make(map[string]bool, len(recreatedVMs))
+			for _, vmConfig := range recreatedVMs {
+				recreatedVMNames[vmConfig.Name] = true
+			}
+			_, readyErr := waitForVMsReady(project, recreatedVMs, keyPath, recreatedVMNames)
 			if err := incompleteCommandError("reload", errors.Join(append(reloadFailures, readyErr)...)); err != nil {
 				return err
 			}

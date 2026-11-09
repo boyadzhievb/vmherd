@@ -3,6 +3,7 @@ package cloudinit
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -291,8 +292,6 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 
 	expectedFragments := []string{
 		"runcmd:",
-		"mkdir -p '/vagrant'",
-		"mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'",
 		"mounts:",
 		`  - [vmherd_share_0, /vagrant, 9p, "trans=virtio,version=9p2000.L,noatime,nofail", "0", "0"]`,
 		"  - name: vmherd\n    uid: 1001\n",
@@ -303,6 +302,9 @@ func TestGenerateFilesWithSharedMounts(t *testing.T) {
 			t.Errorf("user-data missing expected fragment %q", fragment)
 		}
 	}
+	assertRuncmdHasLines(t, files.UserData,
+		bashCommandLine("mkdir -p '/vagrant'"),
+		bashCommandLine("mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'"))
 }
 
 // TestGenerateFilesWithCombinedProvisioning verifies that both shell and file provisioning steps coexist in user-data.
@@ -386,9 +388,11 @@ func TestGenerateFilesWithMultipleSharedMounts(t *testing.T) {
 	}
 	userDataContent := string(userData)
 
+	assertRuncmdHasLines(t, files.UserData,
+		bashCommandLine("mkdir -p '/vagrant'"),
+		bashCommandLine("mkdir -p '/data'"))
+
 	expectedFragments := []string{
-		"mkdir -p '/vagrant'",
-		"mkdir -p '/data'",
 		"vmherd_share_0",
 		"vmherd_share_1",
 		"mount -t 9p",
@@ -459,10 +463,6 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 		"encoding: b64",
 		// Shell provisioning and shared mount commands share the runcmd section.
 		"runcmd:",
-		"apt-get update",
-		"mkdir -p '/vagrant'",
-		"mount -t 9p",
-		"vmherd_share_0",
 		// Shared mounts produce the mounts section.
 		"mounts:",
 	}
@@ -480,12 +480,17 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 	}
 
 	// The home fix runs before provisioning (which may use ~), the share
-	// fallback mount after it.
-	homeFixIndex := strings.Index(userDataContent, `chown vmherd: \"$(getent passwd vmherd | cut -d: -f6)\"`)
-	provisionIndex := strings.Index(userDataContent, "apt-get update")
-	mountIndex := strings.Index(userDataContent, "mountpoint -q '/vagrant'")
-	if homeFixIndex < 0 || provisionIndex < 0 || mountIndex < 0 || homeFixIndex > provisionIndex || provisionIndex > mountIndex {
-		t.Errorf("runcmd order must be home fix (%d) < provisioning (%d) < share mount (%d):\n%s", homeFixIndex, provisionIndex, mountIndex, userDataContent)
+	// fallback mounts after it, and the failed-step check last.
+	wantRuncmdLines := []string{
+		"vmherd_failed_step=",
+		bashCommandLine(`chown vmherd: "$(getent passwd vmherd | cut -d: -f6)"`),
+		guardedStepLine("1 of 2", "apt-get update"),
+		bashCommandLine("mkdir -p '/vagrant'"),
+		bashCommandLine("mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'"),
+		failedStepCheckLine(),
+	}
+	if gotRuncmdLines := readRuncmdLines(t, files.UserData); !slices.Equal(gotRuncmdLines, wantRuncmdLines) {
+		t.Errorf("runcmd lines =\n%s\nwant\n%s", strings.Join(gotRuncmdLines, "\n"), strings.Join(wantRuncmdLines, "\n"))
 	}
 }
 
@@ -516,9 +521,8 @@ func TestMultiLineInlineCommandWrappedInBash(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, `["/bin/bash", "-c",`) {
-		t.Error("multi-line command should be wrapped in bash -c invocation")
-	}
+	// The whole script is one runcmd entry run by bash, not one entry per line.
+	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", multiLineScript))
 
 	// The individual lines of the script must NOT appear as separate runcmd entries.
 	lines := strings.Split(content, "\n")
@@ -560,9 +564,7 @@ func TestSingleLineCommandWrappedInBash(t *testing.T) {
 	}
 	content := string(data)
 
-	if !strings.Contains(content, `["/bin/bash", "-c",`) {
-		t.Error("single-line command should be wrapped in bash -c invocation")
-	}
+	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", "apt-get update"))
 	if !strings.Contains(content, "apt-get update") {
 		t.Error("single-line command content should be present")
 	}
@@ -606,9 +608,9 @@ func TestYAMLSpecialCharactersInCommand(t *testing.T) {
 			}
 			content := string(data)
 
-			if !strings.Contains(content, `["/bin/bash", "-c",`) {
-				t.Errorf("command with %s should be wrapped in bash -c", tc.name)
-			}
+			// Decoding user-data must give back exactly the guarded line, so the
+			// YAML-special characters stayed inside the entry.
+			assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", tc.command))
 
 			// The command must NOT appear as a bare YAML string (  - <command>).
 			bareEntry := "  - " + tc.command + "\n"
@@ -801,5 +803,33 @@ func TestSharedMountRuncmdsQuoteGuestPath(t *testing.T) {
 	wantMount := `mountpoint -q '/home/me/my app'\''s' || mount -t 9p -o ` + sharedMountOptions + ` vmherd_share_0 '/home/me/my app'\''s'`
 	if len(runcmds) != 2 || runcmds[0] != `mkdir -p '/home/me/my app'\''s'` || runcmds[1] != wantMount {
 		t.Errorf("sharedMountRuncmds() = %q", runcmds)
+	}
+}
+
+// readRuncmdLines decodes the user-data file and returns its runcmd entries.
+func readRuncmdLines(t *testing.T, userDataPath string) []string {
+	t.Helper()
+	userData, err := os.ReadFile(userDataPath)
+	if err != nil {
+		t.Fatalf("cannot read user-data: %v", err)
+	}
+	var cloudConfig struct {
+		Runcmd []string `yaml:"runcmd"`
+	}
+	if err := yaml.Unmarshal(userData, &cloudConfig); err != nil {
+		t.Fatalf("user-data is not valid YAML: %v\n%s", err, userData)
+	}
+	return cloudConfig.Runcmd
+}
+
+// assertRuncmdHasLines fails the test unless every wanted line is one of the
+// user-data's runcmd entries, exactly.
+func assertRuncmdHasLines(t *testing.T, userDataPath string, wantedLines ...string) {
+	t.Helper()
+	runcmdLines := readRuncmdLines(t, userDataPath)
+	for _, wantedLine := range wantedLines {
+		if !slices.Contains(runcmdLines, wantedLine) {
+			t.Errorf("runcmd has no entry %q; entries:\n%s", wantedLine, strings.Join(runcmdLines, "\n"))
+		}
 	}
 }

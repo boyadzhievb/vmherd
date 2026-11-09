@@ -71,23 +71,30 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			activeVMs, bringUpErr, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), subnetBase, dnsServer)
+			bringUp, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), subnetBase, dnsServer)
 			if err != nil {
 				return err
 			}
 
-			readyVMs, readyErr := waitForVMsReady(project, activeVMs, keyPath)
+			readyVMs, readyErr := waitForVMsReady(project, bringUp.activeVMs, keyPath, bringUp.createdVMNames)
 			printReadyVMs(readyVMs, keyPath, project.Herdfile.SSH.User, len(vms))
-			return incompleteCommandError("up", errors.Join(bringUpErr, readyErr))
+			return incompleteCommandError("up", errors.Join(bringUp.vmFailures, readyErr))
 		},
 	}
 }
 
+// bringUpResult is what bringUpVMs achieved.
+type bringUpResult struct {
+	activeVMs      []config.VM     // VMs that are now booted (started, resumed or created)
+	createdVMNames map[string]bool // VMs created in this run, booting for the first time
+	vmFailures     error           // joined errors of VMs that could not be brought up
+}
+
 // bringUpVMs starts or resumes existing VMs, then creates missing VMs in
-// parallel. Every VM is attempted: it returns the VMs that are now booted and
-// the joined errors of those that failed. err is set only for failures that
-// stop all VMs (libvirt unreachable, image download).
-func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dnsServer string) (activeVMs []config.VM, vmFailures error, err error) {
+// parallel. Every VM is attempted; per-VM failures go into the result. err is
+// set only for failures that stop all VMs (libvirt unreachable, image download).
+func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dnsServer string) (bringUpResult, error) {
+	result := bringUpResult{createdVMNames: make(map[string]bool)}
 	var vmsToCreate []config.VM
 	var failures []error
 
@@ -95,7 +102,7 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 		domainName := project.DomainName(vmConfig.Name)
 		state, err := vm.State(domainName)
 		if err != nil {
-			return nil, nil, err
+			return bringUpResult{}, err
 		}
 
 		if state == vm.StateNotCreated {
@@ -111,28 +118,26 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 				continue
 			}
 		}
-		activeVMs = append(activeVMs, vmConfig)
+		result.activeVMs = append(result.activeVMs, vmConfig)
 	}
 
-	if len(vmsToCreate) == 0 {
-		return activeVMs, errors.Join(failures...), nil
-	}
-
-	resolvedImages, err := resolveAndCacheImages(vmsToCreate, project.Herdfile.Images)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	results := createVMsInParallel(project, vmsToCreate, resolvedImages, pubKey, subnetBase, dnsServer)
-	for _, result := range results {
-		if result.err != nil {
-			ui.Printf("%s: creation failed (error below).\n", result.vmConfig.Name)
-			failures = append(failures, fmt.Errorf("%s: creating VM: %w", result.vmConfig.Name, result.err))
-			continue
+	if len(vmsToCreate) > 0 {
+		resolvedImages, err := resolveAndCacheImages(vmsToCreate, project.Herdfile.Images)
+		if err != nil {
+			return bringUpResult{}, err
 		}
-		activeVMs = append(activeVMs, result.vmConfig)
+		for _, created := range createVMsInParallel(project, vmsToCreate, resolvedImages, pubKey, subnetBase, dnsServer) {
+			if created.err != nil {
+				ui.Printf("%s: creation failed (error below).\n", created.vmConfig.Name)
+				failures = append(failures, fmt.Errorf("%s: creating VM: %w", created.vmConfig.Name, created.err))
+				continue
+			}
+			result.activeVMs = append(result.activeVMs, created.vmConfig)
+			result.createdVMNames[created.vmConfig.Name] = true
+		}
 	}
-	return activeVMs, errors.Join(failures...), nil
+	result.vmFailures = errors.Join(failures...)
+	return result, nil
 }
 
 // printReadyVMs lists the VMs that answered SSH with their ssh command line,

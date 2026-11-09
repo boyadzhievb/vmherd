@@ -199,6 +199,10 @@ vmherd reload ctrl
 vmherd provision
 ```
 
+### Errors and exit codes
+
+Commands that act on several VMs (`up`, `down`, `restart`, `reload`, `destroy`) still handle every VM when one of them fails, then list each VM's error at the end and exit 1. `up` exits 1 when a VM could not be created or started, gets no DHCP lease, never answers SSH, fails a first-boot provisioning step, or its port forwarding fails. If libvirt itself can't be reached, every command stops right away and says so, instead of reporting VMs as "not created".
+
 ## Supported Images
 
 | Image | Description |
@@ -219,20 +223,20 @@ All images are downloaded directly from official distro vendors and verified wit
 
 1. **Image download** — Official cloud images are fetched from vendor CDNs and cached at `~/.vmherd/images/`. SHA256 checksums are verified against the vendor's published checksums.
 
-2. **SSH key generation** — An ed25519 key pair is generated per project and stored in `.vmherd/` in your project directory.
+2. **SSH key generation** — An ed25519 key pair is generated per project and stored in the project's state directory (see [State](#state)).
 
-3. **Cloud-init** — For each VM, vmherd generates cloud-init user-data (SSH key injection, user creation, provisioning), network-config (static IP), and meta-data. These are packaged into a cidata ISO and attached to the VM — no external tools needed.
+3. **Cloud-init** — For each VM, vmherd generates cloud-init user-data (SSH key injection, user creation, provisioning), network-config (static IP), and meta-data. These are packaged into a cidata ISO and attached to the VM — no external tools needed. On first boot the provisioning steps run in order; if one fails, the later steps are skipped (shared folders are still mounted). `vmherd up` and `vmherd reload` wait for this first-boot run to finish (up to 30 minutes) and exit 1 if a step failed, naming the step and showing the end of the guest's `/var/log/cloud-init-output.log`. VMs that were already provisioned are not checked again; rerun steps with `vmherd provision`.
 
 4. **VM creation** — VMs are created by generating libvirt domain XML and defining them via `virsh`, with a qcow2 disk backed by the cached cloud image (copy-on-write, so disk creation is instant).
 
-5. **Idempotent operations** — `vmherd up` creates what's missing, starts what's stopped, and leaves what's running.
+5. **Idempotent operations** — `vmherd up` creates what's missing, starts what's stopped, resumes what's paused or suspended, and leaves what's running. A crashed VM is forced off and started again.
 
 ## State
 
 | What | Where |
 |------|-------|
 | Cloud images | `~/.vmherd/images/` |
-| SSH keys, cloud-init files | `.vmherd/` in project directory |
+| SSH keys, cloud-init files | `$XDG_STATE_HOME/vmherd/<project>-<hash>/` (default `~/.local/state/vmherd/`); `vmherd info state-dir` prints it, `VMHERD_STATE_DIR` overrides it. Projects that already have an in-project `.vmherd/` keep using it. |
 | VM disks | `/var/lib/libvirt/images/vmherd-{project}-{hash}-{name}.qcow2` |
 | Networks | libvirt networks prefixed `vmherd-` |
 

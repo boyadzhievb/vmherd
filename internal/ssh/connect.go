@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,35 @@ func Connect(keyPath, user, ip string, command []string) error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// sshConnectionFailureExitCode is the exit code ssh itself returns when it
+// cannot connect or the session breaks, as opposed to the remote command's.
+const sshConnectionFailureExitCode = 255
+
+// RunCommandWithTimeout runs commandLine on a VM (no terminal, stdin closed)
+// and returns its combined output and exit code. err is set only when the
+// command didn't run to completion: ssh couldn't connect or timeout passed.
+func RunCommandWithTimeout(keyPath, user, ip, commandLine string, timeout time.Duration) (string, int, error) {
+	commandContext, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	args := append(sshBaseArgs(keyPath, user, ip), commandLine)
+	output, err := exec.CommandContext(commandContext, "ssh", args...).CombinedOutput()
+	if commandContext.Err() != nil {
+		return string(output), 0, fmt.Errorf("'%s' on %s did not finish within %s", commandLine, ip, timeout)
+	}
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		if exitError.ExitCode() == sshConnectionFailureExitCode {
+			return string(output), 0, fmt.Errorf("ssh to %s failed while running '%s': %s", ip, commandLine, strings.TrimSpace(string(output)))
+		}
+		return string(output), exitError.ExitCode(), nil
+	}
+	if err != nil {
+		return string(output), 0, fmt.Errorf("running ssh: %w — check that ssh is installed", err)
+	}
+	return string(output), 0, nil
 }
 
 // RunScriptAsRoot runs a shell script on a VM as root via 'sudo bash -c'.
