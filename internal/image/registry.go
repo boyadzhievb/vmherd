@@ -68,16 +68,6 @@ func buildDescription(distro, codename string) string {
 	return fmt.Sprintf("%s %s", capitalDistro, codename)
 }
 
-// DefaultImages returns the image entries pre-populated in vmherd init.
-// Only Ubuntu and Fedora are included — users add other distros themselves.
-func DefaultImages() map[string]string {
-	return map[string]string{
-		"ubuntu:noble":    "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
-		"ubuntu:resolute": "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img",
-		"fedora:42":       "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2",
-	}
-}
-
 // ListAll returns all entries from the provided images map, sorted by key.
 func ListAll(images map[string]string) []Entry {
 	keys := make([]string, 0, len(images))

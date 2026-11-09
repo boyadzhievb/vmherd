@@ -18,10 +18,10 @@ The image URL is resolved from the Herdfile images section (or defaults if no He
 Examples:
   vmherd pull ubuntu:noble
   vmherd pull ubuntu:resolute
-  vmherd pull fedora:42`,
+  vmherd pull fedora:45`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			images := image.DefaultImages()
+			images := config.BuiltInImageURLs()
 
 			project, loadError := config.LoadProject()
 			if loadError == nil && len(project.Herdfile.Images) > 0 {

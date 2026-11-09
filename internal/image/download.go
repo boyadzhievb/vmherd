@@ -60,6 +60,10 @@ func Download(entry *Entry) (string, error) {
 	cachedPath := CachedPath(entry)
 	tmpPath := cachedPath + ".tmp"
 
+	if err := checkImageURLAvailable(http.DefaultClient, entry.ImageURL); err != nil {
+		return "", fmt.Errorf("cannot download %s: %w", entry.Description, err)
+	}
+
 	checksum, discoverError := discoverChecksumInfo(entry)
 	if discoverError != nil {
 		return "", fmt.Errorf("cannot find checksum for %s: %w", entry.Description, discoverError)
@@ -87,6 +91,30 @@ func Download(entry *Entry) (string, error) {
 	}
 
 	return cachedPath, nil
+}
+
+// checkImageURLAvailable asks the vendor (HEAD, redirects followed) whether
+// the image file exists, so a stale URL is reported as such instead of as a
+// missing checksum. Servers that don't answer HEAD are not held against the URL.
+func checkImageURLAvailable(httpClient *http.Client, imageURL string) error {
+	if !strings.HasPrefix(imageURL, "https://") {
+		return fmt.Errorf("refusing to download from non-HTTPS URL: %s — all image URLs must use HTTPS", imageURL)
+	}
+	response, err := httpClient.Head(imageURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
+	if err != nil {
+		return fmt.Errorf("cannot reach %s: %w — check the network connection and the URL", imageURL, err)
+	}
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return fmt.Errorf("closing HEAD response from %s: %w", imageURL, closeErr)
+	}
+	switch response.StatusCode {
+	case http.StatusNotFound, http.StatusGone:
+		directoryURL := imageURL[:strings.LastIndex(imageURL, "/")+1]
+		return fmt.Errorf("image URL %s returns HTTP %d — the vendor no longer publishes this file. "+
+			"Look up the current file name at %s and update the images: entry in your Herdfile",
+			imageURL, response.StatusCode, directoryURL)
+	}
+	return nil
 }
 
 // discoverChecksumInfo finds the checksum for an image entry. If the entry has

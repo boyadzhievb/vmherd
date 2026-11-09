@@ -263,3 +263,35 @@ func TestDefaultNetworkNameIsProjectUnique(t *testing.T) {
 		t.Errorf("domain %s and network %s use different prefixes", domainName, firstName)
 	}
 }
+
+// TestBuiltInImagesAreValid checks every built-in image: a distro:codename
+// name, an https URL, no duplicates, and the same list in 'vmherd init'.
+func TestBuiltInImagesAreValid(t *testing.T) {
+	builtInImages := BuiltInImages()
+	if len(builtInImages) == 0 {
+		t.Fatal("no built-in images")
+	}
+	exampleContent, err := ExampleHerdfile("vmherd-web-01234567", "192.168.151")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenNames := make(map[string]bool)
+	for _, builtInImage := range builtInImages {
+		if seenNames[builtInImage.Name] {
+			t.Errorf("duplicate built-in image %s", builtInImage.Name)
+		}
+		seenNames[builtInImage.Name] = true
+		if !isDistroCodename(builtInImage.Name) {
+			t.Errorf("built-in image name %q is not distro:codename", builtInImage.Name)
+		}
+		if err := validateImageURL(builtInImage.Name, builtInImage.URL); err != nil {
+			t.Error(err)
+		}
+		if wantLine := "  " + builtInImage.Name + ": " + builtInImage.URL + "\n"; !strings.Contains(exampleContent, wantLine) {
+			t.Errorf("example Herdfile lacks %q:\n%s", wantLine, exampleContent)
+		}
+	}
+	if len(BuiltInImageURLs()) != len(builtInImages) {
+		t.Errorf("BuiltInImageURLs has %d entries, BuiltInImages %d", len(BuiltInImageURLs()), len(builtInImages))
+	}
+}

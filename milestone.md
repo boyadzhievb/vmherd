@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 17 | 12 |
+| M1 | Correctness of existing features | 17 | 13 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -239,12 +239,14 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 ### Phase 1D — Found while testing M0 on the testbed
 
-- [ ] **M1.12 — 🔬 `fedora:42` checksum lookup fails for the example URL** · Med
+- [x] **M1.12 — 🔬 `fedora:42` checksum lookup fails for the example URL** · Med
   - **Files:** `internal/image/registry.go:106`, `internal/config/project.go:251` (`ExampleHerdfile`), `internal/image/download.go` (`discoverChecksumInfo`)
   - **Problem:** `vmherd pull fedora:42` with the URL from the built-in registry and example Herdfile fails at the checksum step. Seen on testbed .49 during M0 testing.
   - **Verify:** Run `vmherd pull fedora:42` and check which checksum files the directory listing yields (Fedora publishes a signed `*-CHECKSUM` file, and `download.fedoraproject.org` redirects to mirrors).
   - **Fix:** Depends on the repro: point `ChecksumURL` at Fedora's `CHECKSUM` file, or make discovery handle the redirect and Fedora's BSD-style `SHA256 (file) = hash` lines.
   - **Done when:** `vmherd pull fedora:42` downloads and verifies the image on the testbed.
+  - **Repro (2026-11-09, .71):** `pull fedora:42` failed with `no hash found for "Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2" in checksum file`. Checksum discovery itself worked: it followed `download.fedoraproject.org`'s 302 to a mirror, found `Fedora-Cloud-42-1.1-x86_64-CHECKSUM` and parses its BSD-style `SHA256 (file) = hash` lines. The built-in URL pointed at a file that doesn't exist (HTTP 404) — Fedora 42 was only published as `42-1.1` — so the checksum file rightly had no entry for it. Fedora 42 is also end-of-life (May 2026); 43, 44 and 45 are on the mirrors.
+  - **Result (2026-11-09):** Built-in images (user's decisions): `fedora:42` replaced by `fedora:44` (`44-1.7`) and `fedora:45` (`45-1.4`); Fedora release images keep their file name for the release's life. The list now lives once, in `config.BuiltInImages()` (new `internal/config/images.go`; `image` imports `config`, so it can't live in `image`): `vmherd init`'s template renders its `images:` section from it, and `pull`/`list-images`/the integration test use `config.BuiltInImageURLs()`; `image.DefaultImages` is gone. Before checksum discovery, `Download` now sends a HEAD for the image URL (redirects followed); a 404/410 is reported as `image URL … returns HTTP 404 — the vendor no longer publishes this file. Look up the current file name at <directory> and update the images: entry in your Herdfile` (servers that refuse HEAD are not held against the URL). README's Supported Images table lists `ubuntu:resolute`, `fedora:44`/`45` (was `fedora:41`) and says which ones `init` writes. Tests: every built-in image has a distro:codename name, an https URL, no duplicate, and appears in the init template; the HEAD check against a local TLS server (200 and 405 pass; 404 and 410 name the status, the directory and the images: entry; plain http refused). Verified on .71: `vmherd init` writes the four images; `pull fedora:45` and `pull fedora:44` download and verify SHA256 (about 70s each); `pull fedora:42` with the old Herdfile entry now reports the 404 and the directory to look in. Booting Fedora VMs is still untested (NetworkManager DNS, see M1.14).
 
 - [ ] **M1.13 — Checksum discovery error ends in `: <nil>`** · Low
   - **Files:** `internal/image/download.go:104-105`

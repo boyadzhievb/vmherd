@@ -218,17 +218,19 @@ Commands that act on several VMs (`up`, `down`, `restart`, `reload`, `destroy`) 
 
 | Image | Description |
 |-------|-------------|
+| `ubuntu:resolute` | Ubuntu 26.04 LTS |
 | `ubuntu:noble` | Ubuntu 24.04 LTS |
 | `ubuntu:jammy` | Ubuntu 22.04 LTS |
 | `ubuntu:focal` | Ubuntu 20.04 LTS |
 | `debian:bookworm` | Debian 12 |
 | `debian:trixie` | Debian 13 |
-| `fedora:41` | Fedora 41 |
+| `fedora:45` | Fedora 45 |
+| `fedora:44` | Fedora 44 |
 | `rocky:9` | Rocky Linux 9 |
 | `almalinux:9` | AlmaLinux 9 |
 | `arch:latest` | Arch Linux |
 
-All images are downloaded directly from official distro vendors and verified with SHA256 checksums.
+All images are downloaded directly from official distro vendors and verified with SHA256 checksums. `vmherd init` writes the download URLs for `ubuntu:noble`, `ubuntu:resolute`, `fedora:44` and `fedora:45`; for the others, add the vendor's image URL under `images:`. If a vendor stops publishing a file (Fedora pins a build number in the file name), `vmherd up`/`pull` say so and point to the directory with the current file name.
 
 ## How It Works
 

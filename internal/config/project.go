@@ -247,9 +247,9 @@ var exampleHerdfileTemplate = template.Must(template.New("Herdfile").Parse(`# He
 # Docs: https://github.com/boyadzhievb/vmherd
 
 images:
-  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-  ubuntu:resolute: https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
-  fedora:42: https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2
+{{- range .Images}}
+  {{.Name}}: {{.URL}}
+{{- end}}
 
 vms:
   - name: ctrl
@@ -289,15 +289,16 @@ ssh:
 
 // exampleHerdfileValues fills exampleHerdfileTemplate.
 type exampleHerdfileValues struct {
-	NetworkName string // project-unique libvirt network name
-	SubnetBase  string // first three octets of a free /24, e.g. "192.168.150"
+	NetworkName string         // project-unique libvirt network name
+	SubnetBase  string         // first three octets of a free /24, e.g. "192.168.150"
+	Images      []BuiltInImage // the images section, from BuiltInImages
 }
 
 // ExampleHerdfile returns a sample Herdfile for 'vmherd init' that uses
 // networkName and the /24 subnet starting at subnetBase.
 func ExampleHerdfile(networkName, subnetBase string) (string, error) {
 	var rendered strings.Builder
-	if err := exampleHerdfileTemplate.Execute(&rendered, exampleHerdfileValues{NetworkName: networkName, SubnetBase: subnetBase}); err != nil {
+	if err := exampleHerdfileTemplate.Execute(&rendered, exampleHerdfileValues{NetworkName: networkName, SubnetBase: subnetBase, Images: BuiltInImages()}); err != nil {
 		return "", fmt.Errorf("rendering example Herdfile: %w", err)
 	}
 	return strings.TrimSpace(rendered.String()) + "\n", nil

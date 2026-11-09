@@ -1,17 +1,21 @@
 package image
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/boyadzhievb/vmherd/internal/config"
 )
 
 func TestResolveFromImages(t *testing.T) {
 	images := map[string]string{
 		"ubuntu:noble":    "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
 		"debian:bookworm": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-amd64.qcow2",
-		"fedora:42":       "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.0.x86_64.qcow2",
+		"fedora:45":       "https://download.fedoraproject.org/pub/fedora/linux/releases/45/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-45-1.4.x86_64.qcow2",
 	}
 
 	tests := []struct {
@@ -20,7 +24,7 @@ func TestResolveFromImages(t *testing.T) {
 	}{
 		{"ubuntu:noble", "ubuntu"},
 		{"debian:bookworm", "debian"},
-		{"fedora:42", "fedora"},
+		{"fedora:45", "fedora"},
 	}
 
 	for _, tt := range tests {
@@ -65,7 +69,7 @@ func TestResolveBadFormat(t *testing.T) {
 }
 
 func TestListAll(t *testing.T) {
-	images := DefaultImages()
+	images := config.BuiltInImageURLs()
 	entries := ListAll(images)
 	if len(entries) == 0 {
 		t.Fatal("expected at least one image from defaults")
@@ -78,16 +82,6 @@ func TestListAll(t *testing.T) {
 			t.Errorf("duplicate entry: %s", key)
 		}
 		seen[key] = true
-	}
-}
-
-func TestDefaultImages(t *testing.T) {
-	defaults := DefaultImages()
-	if len(defaults) == 0 {
-		t.Fatal("DefaultImages returned empty map")
-	}
-	if _, found := defaults["ubuntu:noble"]; !found {
-		t.Error("DefaultImages missing ubuntu:noble")
 	}
 }
 
@@ -327,5 +321,44 @@ func TestDownloadFileRejectsNonHTTPS(t *testing.T) {
 				t.Errorf("error should mention non-HTTPS, got: %v", err)
 			}
 		})
+	}
+}
+
+// TestCheckImageURLAvailable checks that a missing image (404/410) is reported
+// as a stale URL with the directory to look in, while existing files and
+// servers that refuse HEAD pass.
+func TestCheckImageURLAvailable(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/images/current.qcow2":
+			writer.WriteHeader(http.StatusOK)
+		case "/images/gone.qcow2":
+			writer.WriteHeader(http.StatusGone)
+		case "/images/no-head.qcow2":
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	for _, availablePath := range []string{"/images/current.qcow2", "/images/no-head.qcow2"} {
+		if err := checkImageURLAvailable(server.Client(), server.URL+availablePath); err != nil {
+			t.Errorf("%s: unexpected error: %v", availablePath, err)
+		}
+	}
+	for stalePath, wantStatus := range map[string]string{"/images/old-1.0.qcow2": "HTTP 404", "/images/gone.qcow2": "HTTP 410"} {
+		err := checkImageURLAvailable(server.Client(), server.URL+stalePath)
+		if err == nil {
+			t.Fatalf("%s: expected an error", stalePath)
+		}
+		for _, fragment := range []string{wantStatus, "no longer publishes this file", server.URL + "/images/", "images: entry"} {
+			if !strings.Contains(err.Error(), fragment) {
+				t.Errorf("%s: error does not mention %q: %v", stalePath, fragment, err)
+			}
+		}
+	}
+	if err := checkImageURLAvailable(server.Client(), "http://example.org/x.img"); err == nil || !strings.Contains(err.Error(), "non-HTTPS") {
+		t.Errorf("plain http URL: error = %v, want a non-HTTPS refusal", err)
 	}
 }

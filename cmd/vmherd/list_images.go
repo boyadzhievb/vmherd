@@ -16,7 +16,7 @@ func newListImagesCmd() *cobra.Command {
 		Use:   "list-images",
 		Short: "Show cloud images defined in the Herdfile (or defaults if no Herdfile)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			images := image.DefaultImages()
+			images := config.BuiltInImageURLs()
 
 			project, loadError := config.LoadProject()
 			if loadError == nil && len(project.Herdfile.Images) > 0 {
