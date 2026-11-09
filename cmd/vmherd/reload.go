@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
@@ -67,52 +67,46 @@ Examples:
 				return err
 			}
 
+			var recreatedVMs []config.VM
+			var reloadFailures []error
 			for _, vmConfig := range vmsToReload {
-				domainName := project.DomainName(vmConfig.Name)
-				oldDiskPath := project.DiskPath(vmConfig.Name)
-				oldSeedPath := project.SeedPath(vmConfig.Name)
-
-				stopPortForwarding(project, vmConfig)
-
-				if err := shutdownAndDestroy(domainName, vmConfig.Name); err != nil {
-					return err
-				}
-				if err := vm.RemoveDisk(oldDiskPath); err != nil {
-					return fmt.Errorf("cannot remove old disk for %s: %w", vmConfig.Name, err)
-				}
-				if err := cloudinit.RemoveSeed(oldSeedPath); err != nil {
-					return fmt.Errorf("cannot remove old seed for %s: %w", vmConfig.Name, err)
-				}
-
-				// The old domain is gone, so recreate under the project-unique name.
-				project.DropLegacyDomainName(vmConfig.Name)
-				domainName = project.DomainName(vmConfig.Name)
-
-				if err := createVM(project, vmConfig, domainName, pubKey, subnetBase, dnsServer); err != nil {
-					return err
-				}
-			}
-
-			vmsToReload = waitForAddresses(project, vmsToReload)
-			ui.Println("\nWaiting for SSH on reloaded VMs...")
-			for _, vmConfig := range vmsToReload {
-				if vmConfig.Network.IP == "" {
+				if err := reloadSingleVM(project, vmConfig, pubKey, subnetBase, dnsServer); err != nil {
+					reloadFailures = append(reloadFailures, fmt.Errorf("%s: %w", vmConfig.Name, err))
 					continue
 				}
-				ui.Printf("  %s (%s)...", vmConfig.Name, vmConfig.Network.IP)
-				if err := ssh.WaitForSSH(keyPath, project.Herdfile.SSH.User, vmConfig.Network.IP, vmConfig.Name); err != nil {
-					ui.Println(" timeout")
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-					continue
-				}
-				ui.Println(" ready")
+				recreatedVMs = append(recreatedVMs, vmConfig)
 			}
-			startPortForwardingForVMs(project, vmsToReload)
+
+			_, readyErr := waitForVMsReady(project, recreatedVMs, keyPath)
+			if err := incompleteCommandError("reload", errors.Join(append(reloadFailures, readyErr)...)); err != nil {
+				return err
+			}
 
 			ui.Println("Reload complete.")
 			return nil
 		},
 	}
+}
+
+// reloadSingleVM stops and destroys a VM (disk and seed included) and creates
+// it again from the current Herdfile under the project-unique domain name.
+func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, subnetBase, dnsServer string) error {
+	if err := stopPortForwarding(project, vmConfig); err != nil {
+		return err
+	}
+	if err := shutdownAndDestroy(project.DomainName(vmConfig.Name), vmConfig.Name); err != nil {
+		return err
+	}
+	if err := vm.RemoveDisk(project.DiskPath(vmConfig.Name)); err != nil {
+		return fmt.Errorf("cannot remove old disk: %w", err)
+	}
+	if err := cloudinit.RemoveSeed(project.SeedPath(vmConfig.Name)); err != nil {
+		return fmt.Errorf("cannot remove old seed: %w", err)
+	}
+
+	// The old domain is gone, so recreate under the project-unique name.
+	project.DropLegacyDomainName(vmConfig.Name)
+	return createVM(project, vmConfig, project.DomainName(vmConfig.Name), pubKey, subnetBase, dnsServer)
 }
 
 // shutdownAndDestroy gracefully stops a VM (forcing only after the shutdown

@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
@@ -71,40 +71,31 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			activeVMs, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), subnetBase, dnsServer)
+			activeVMs, bringUpErr, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), subnetBase, dnsServer)
 			if err != nil {
 				return err
 			}
 
-			activeVMs = waitForAddresses(project, activeVMs)
-			waitForSSHInParallel(activeVMs, keyPath, project.Herdfile.SSH.User)
-			startPortForwardingForVMs(project, activeVMs)
-
-			ui.Println("\nAll VMs ready:")
-			for _, vmConfig := range activeVMs {
-				if vmConfig.Network.IP != "" {
-					ui.Printf("  %-20s %s   ssh -i %s %s@%s\n",
-						vmConfig.Name, vmConfig.Network.IP, keyPath,
-						project.Herdfile.SSH.User, vmConfig.Network.IP)
-				}
-			}
-
-			return nil
+			readyVMs, readyErr := waitForVMsReady(project, activeVMs, keyPath)
+			printReadyVMs(readyVMs, keyPath, project.Herdfile.SSH.User, len(vms))
+			return incompleteCommandError("up", errors.Join(bringUpErr, readyErr))
 		},
 	}
 }
 
-// bringUpVMs handles running/stopped VMs immediately, then creates missing VMs
-// in parallel. Returns the list of VMs that are now active.
-func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dnsServer string) ([]config.VM, error) {
-	var activeVMs []config.VM
+// bringUpVMs starts or resumes existing VMs, then creates missing VMs in
+// parallel. Every VM is attempted: it returns the VMs that are now booted and
+// the joined errors of those that failed. err is set only for failures that
+// stop all VMs (libvirt unreachable, image download).
+func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dnsServer string) (activeVMs []config.VM, vmFailures error, err error) {
 	var vmsToCreate []config.VM
+	var failures []error
 
 	for _, vmConfig := range vms {
 		domainName := project.DomainName(vmConfig.Name)
 		state, err := vm.State(domainName)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if state == vm.StateNotCreated {
@@ -116,41 +107,49 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 		} else {
 			ui.Println(startExistingVMMessage(vmConfig.Name, state))
 			if err := vm.EnsureRunning(domainName, state); err != nil {
-				return nil, fmt.Errorf("bringing up %s: %w", vmConfig.Name, err)
+				failures = append(failures, fmt.Errorf("%s: %w", vmConfig.Name, err))
+				continue
 			}
 		}
 		activeVMs = append(activeVMs, vmConfig)
 	}
 
 	if len(vmsToCreate) == 0 {
-		return activeVMs, nil
+		return activeVMs, errors.Join(failures...), nil
 	}
 
 	resolvedImages, err := resolveAndCacheImages(vmsToCreate, project.Herdfile.Images)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	results := createVMsInParallel(project, vmsToCreate, resolvedImages, pubKey, subnetBase, dnsServer)
-
-	failCount := 0
 	for _, result := range results {
 		if result.err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating %s: %v\n", result.vmConfig.Name, result.err)
-			failCount++
-		} else {
-			activeVMs = append(activeVMs, result.vmConfig)
+			ui.Printf("%s: creation failed (error below).\n", result.vmConfig.Name)
+			failures = append(failures, fmt.Errorf("%s: creating VM: %w", result.vmConfig.Name, result.err))
+			continue
 		}
+		activeVMs = append(activeVMs, result.vmConfig)
 	}
+	return activeVMs, errors.Join(failures...), nil
+}
 
-	if failCount == len(vmsToCreate) {
-		return nil, fmt.Errorf("all %d VM creations failed — see errors above", failCount)
+// printReadyVMs lists the VMs that answered SSH with their ssh command line,
+// saying how many of the requested VMs that is when some are missing.
+func printReadyVMs(readyVMs []config.VM, keyPath, sshUser string, requestedVMCount int) {
+	if len(readyVMs) == 0 {
+		return
 	}
-	if failCount > 0 {
-		fmt.Fprintf(os.Stderr, "%d of %d VM creations failed\n", failCount, len(vmsToCreate))
+	if len(readyVMs) == requestedVMCount {
+		ui.Println("\nAll VMs ready:")
+	} else {
+		ui.Printf("\n%d of %d VMs ready:\n", len(readyVMs), requestedVMCount)
 	}
-
-	return activeVMs, nil
+	for _, vmConfig := range readyVMs {
+		ui.Printf("  %-20s %s   ssh -i %s %s@%s\n",
+			vmConfig.Name, vmConfig.Network.IP, keyPath, sshUser, vmConfig.Network.IP)
+	}
 }
 
 // startExistingVMMessage says what 'up' does to bring an existing, not
@@ -288,50 +287,6 @@ func createSingleVM(
 
 	ui.Printf("%s created.\n", vmConfig.Name)
 	return nil
-}
-
-// waitForSSHInParallel waits for SSH readiness on all VMs concurrently
-// and prints results after all checks complete.
-func waitForSSHInParallel(vms []config.VM, keyPath, sshUser string) {
-	var vmsWithIP []config.VM
-	for _, vmConfig := range vms {
-		if vmConfig.Network.IP != "" {
-			vmsWithIP = append(vmsWithIP, vmConfig)
-		}
-	}
-	if len(vmsWithIP) == 0 {
-		return
-	}
-
-	ui.Println("\nWaiting for SSH on all VMs...")
-
-	type sshResult struct {
-		vmConfig config.VM
-		err      error
-	}
-
-	results := make([]sshResult, len(vmsWithIP))
-	group := new(errgroup.Group)
-
-	for i, vmConfig := range vmsWithIP {
-		results[i].vmConfig = vmConfig
-
-		group.Go(func() error {
-			results[i].err = ssh.WaitForSSH(keyPath, sshUser, vmConfig.Network.IP, vmConfig.Name)
-			return nil
-		})
-	}
-
-	_ = group.Wait()
-
-	for _, result := range results {
-		if result.err != nil {
-			ui.Printf("  %s (%s)... timeout\n", result.vmConfig.Name, result.vmConfig.Network.IP)
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", result.err)
-		} else {
-			ui.Printf("  %s (%s)... ready\n", result.vmConfig.Name, result.vmConfig.Network.IP)
-		}
-	}
 }
 
 // buildSharedMounts converts Herdfile shared folder config into vm.SharedFolderMount

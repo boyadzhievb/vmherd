@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
@@ -31,10 +31,9 @@ func newDestroyCmd() *cobra.Command {
 
 			destroyAll := len(args) == 0
 
+			var destroyFailures []error
 			for _, vmConfig := range vms {
-				domainName := project.DomainName(vmConfig.Name)
-
-				state, err := vm.State(domainName)
+				state, err := vm.State(project.DomainName(vmConfig.Name))
 				if err != nil {
 					return fmt.Errorf("cannot destroy %s: %w", vmConfig.Name, err)
 				}
@@ -42,36 +41,41 @@ func newDestroyCmd() *cobra.Command {
 					ui.Printf("%s does not exist, skipping.\n", vmConfig.Name)
 					continue
 				}
-
 				ui.Printf("Destroying %s...\n", vmConfig.Name)
-				stopPortForwarding(project, vmConfig)
-				if err := vm.Destroy(domainName); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				}
-				if err := vm.RemoveDisk(project.DiskPath(vmConfig.Name)); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				}
-				if err := cloudinit.RemoveSeed(project.SeedPath(vmConfig.Name)); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-				}
-				if err := config.RemoveVMStateDir(project.StateDir, vmConfig.Name); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+				if err := destroySingleVM(project, vmConfig); err != nil {
+					destroyFailures = append(destroyFailures, fmt.Errorf("%s: %w", vmConfig.Name, err))
 				}
 			}
 
 			if destroyAll {
 				if err := destroyNetworkUnlessShared(project.Herdfile.Network.Name); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+					destroyFailures = append(destroyFailures, err)
 				}
 				if err := config.RemoveProjectStateDir(project.StateDir, project.Herdfile.VMNames()); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+					destroyFailures = append(destroyFailures, err)
 				}
+			}
+			if err := incompleteCommandError("destroy", errors.Join(destroyFailures...)); err != nil {
+				return err
 			}
 
 			ui.Println("Done.")
 			return nil
 		},
 	}
+}
+
+// destroySingleVM stops a VM's port forwarding, removes its libvirt domain,
+// disk, seed ISO and state directory. Every step is attempted even when an
+// earlier one fails; the failures are returned joined.
+func destroySingleVM(project *config.Project, vmConfig config.VM) error {
+	return errors.Join(
+		stopPortForwarding(project, vmConfig),
+		vm.Destroy(project.DomainName(vmConfig.Name)),
+		vm.RemoveDisk(project.DiskPath(vmConfig.Name)),
+		cloudinit.RemoveSeed(project.SeedPath(vmConfig.Name)),
+		config.RemoveVMStateDir(project.StateDir, vmConfig.Name),
+	)
 }
 
 // destroyNetworkUnlessShared removes the project's libvirt network only when

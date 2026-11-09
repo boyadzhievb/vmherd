@@ -1,42 +1,49 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/portfwd"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
-	"github.com/boyadzhievb/vmherd/internal/ui"
 )
 
 // startPortForwardingForVMs starts (or keeps, or updates) the SSH port-forward
-// tunnel of each VM. Call it after SSH is ready. Failures are warnings.
-func startPortForwardingForVMs(project *config.Project, vms []config.VM) {
+// tunnel of each VM. Call it after SSH is ready. Every VM is attempted; the
+// failures are returned joined.
+func startPortForwardingForVMs(project *config.Project, vms []config.VM) error {
+	var portForwardErrors []error
 	for _, vmConfig := range vms {
 		if vmConfig.Network.IP == "" {
 			continue
 		}
 		tunnel := portForwardTunnel(project, vmConfig)
 		if err := portfwd.RemoveLegacyRules(tunnel.GuestIP, tunnel.Forwards); err != nil {
-			ui.Printf("Warning: %v\n", err)
+			portForwardErrors = append(portForwardErrors, fmt.Errorf("%s: %w", vmConfig.Name, err))
 		}
 		if err := portfwd.Start(tunnel); err != nil {
-			ui.Printf("Warning: port forwarding for %s failed: %v\n", vmConfig.Name, err)
+			portForwardErrors = append(portForwardErrors, fmt.Errorf("%s: port forwarding failed: %w", vmConfig.Name, err))
 		}
 	}
+	return errors.Join(portForwardErrors...)
 }
 
 // stopPortForwarding stops a VM's SSH port-forward tunnel, if one runs, and
 // removes iptables rules vmherd v0.1.x left for it (v0.1.x VMs always have a
-// static ip, so the Herdfile value is the right one here).
-func stopPortForwarding(project *config.Project, vmConfig config.VM) {
+// static ip, so the Herdfile value is the right one here). Both steps are
+// always attempted; errors don't name the VM, callers add it.
+func stopPortForwarding(project *config.Project, vmConfig config.VM) error {
+	var stopErrors []error
 	if err := portfwd.Stop(vmStateDir(project, vmConfig)); err != nil {
-		ui.Printf("Warning: could not stop port forwarding for %s: %v\n", vmConfig.Name, err)
+		stopErrors = append(stopErrors, fmt.Errorf("could not stop port forwarding: %w", err))
 	}
 	tunnel := portForwardTunnel(project, vmConfig)
 	if err := portfwd.RemoveLegacyRules(tunnel.GuestIP, tunnel.Forwards); err != nil {
-		ui.Printf("Warning: %v\n", err)
+		stopErrors = append(stopErrors, err)
 	}
+	return errors.Join(stopErrors...)
 }
 
 // portForwardTunnel describes the SSH tunnel carrying a VM's Herdfile ports.

@@ -10,15 +10,20 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// stopVMsGracefully stops running VMs in parallel: port forwarding first, then
-// an ACPI shutdown that is forced only after vm.GracefulShutdownTimeout.
-// It returns the joined errors of VMs that could not be stopped.
-func stopVMsGracefully(project *config.Project, vms []config.VM) error {
+// stopVMsGracefully stops VMs in parallel: port forwarding first, then an
+// ACPI shutdown that is forced only after vm.GracefulShutdownTimeout. Every
+// VM is attempted. It returns the VMs that are now off and the joined errors
+// of the rest; a port forwarding that won't stop is an error but the VM still
+// counts as off.
+func stopVMsGracefully(project *config.Project, vms []config.VM) ([]config.VM, error) {
 	stopErrors := make([]error, len(vms))
+	portForwardErrors := make([]error, len(vms))
 	group := new(errgroup.Group)
 	for index, vmConfig := range vms {
 		ui.Printf("Stopping %s...\n", vmConfig.Name)
-		stopPortForwarding(project, vmConfig)
+		if err := stopPortForwarding(project, vmConfig); err != nil {
+			portForwardErrors[index] = fmt.Errorf("%s: %w", vmConfig.Name, err)
+		}
 		group.Go(func() error {
 			stopOutcome, err := vm.StopGracefully(project.DomainName(vmConfig.Name), vm.GracefulShutdownTimeout)
 			if err != nil {
@@ -30,9 +35,16 @@ func stopVMsGracefully(project *config.Project, vms []config.VM) error {
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return fmt.Errorf("stopping VMs: %w", err)
+		return nil, fmt.Errorf("stopping VMs: %w", err)
 	}
-	return errors.Join(stopErrors...)
+
+	var stoppedVMs []config.VM
+	for index, vmConfig := range vms {
+		if stopErrors[index] == nil {
+			stoppedVMs = append(stoppedVMs, vmConfig)
+		}
+	}
+	return stoppedVMs, errors.Join(append(portForwardErrors, stopErrors...)...)
 }
 
 // reportForcedStop tells the user when a VM was forced off instead of

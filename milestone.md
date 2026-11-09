@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 17 | 7 |
+| M1 | Correctness of existing features | 17 | 8 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -195,12 +195,13 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Not verified:** `crashed` and `pmsuspended` couldn't be produced: the domain XML has no pvpanic device, so QEMU never sees a guest crash (and `on_crash=destroy` would make it `shut off`), and `dompmsuspend` needs the guest agent channel. Both paths are covered only by code review and unit tests.
   - **Found, not fixed:** during an ACPI shutdown, libvirt's QEMU driver reports `running`, not `in shutdown`. So `up` right after an outside `virsh shutdown` treats the VM as running, the SSH wait times out and the VM ends up shut off (`up` exits 0, see M1.7). Left for a follow-up: libvirt doesn't expose the request, so a fix needs another signal (for example a short wait after `up` sees `running` without SSH).
 
-- [ ] **M1.7 — Non-zero exit code on partial failure** · Med
+- [x] **M1.7 — Non-zero exit code on partial failure** · Med
   - **Files:** `cmd/vmherd/up.go:155-160,311-318`, `destroy.go`, `portfwd_helpers.go:26`, `reload.go:102`
   - **Problem:** Failed VM creations (when at least one succeeds), destroy warnings, port-forward failures and SSH timeouts all exit 0.
   - **Fix:** Collect the errors with `errors.Join` and return them at the end so the exit code is 1, while still processing every VM.
   - **Done when:** A test (after M2.3) or a manual check shows `up` exits 1 when one of two VMs fails.
   - **Also (from M1.4 review):** a DHCP VM that gets no lease, like a VM whose SSH wait times out, only prints a warning, is left out of the "All VMs ready" list, and `up` exits 0.
+  - **Result (2026-11-09):** `up`, `restart`, `reload`, `destroy` and `down` process every VM, collect each VM's failure as `<vm>: <error>` and end with `'vmherd <command>' did not complete for every VM:` plus one failure per line (exit 1); `main` prints it once, so nothing is printed twice. Failures that affect every VM still stop the command at once (libvirt unreachable, image download, network setup, `restart` of a VM that doesn't exist). Counted as failures: creation, start/resume of an existing VM (it used to abort the remaining VMs), no DHCP lease, SSH timeout (as in Vagrant, a VM that never becomes reachable fails `up`), port-forward start/stop, every `destroy` step (all steps are still attempted; network and project-state removal too), and in `reload` each VM's destroy/recreate (it used to abort the rest). Shared helpers now return what they achieved plus an error: `waitForAddresses` and `waitForSSHInParallel` return only the VMs that got there, `stopVMsGracefully` returns the VMs that are off (so `restart` still starts the others), and the new `waitForVMsReady` (lease → SSH → port forwarding) replaces three copies of that sequence, including `reload`'s own serial SSH loop. `up` lists only VMs that answered SSH ("1 of 2 VMs ready:"). Final success lines ("Restart complete.", "Done.") print only when nothing failed. A failed disk removal now says how to remove the file. Verified on .71: with a file at worker-1's disk path, `up` brings ctrl up, lists 1 of 2 ready, prints worker-1's error and exits 1; `destroy worker-1` with the disk `chattr +i` still undefines the domain and removes seed and state, then exits 1 naming the disk; `up` right after an outside `virsh shutdown` (M1.6 finding) now exits 1 with the SSH timeout, and a second `up` recovers; `restart`, `reload`, `down`, `up` exit 0 when nothing fails.
 
 - [ ] **M1.8 — Wait for cloud-init to finish and surface failures** · Med
   - **Files:** `cmd/vmherd/up.go` (`waitForSSHInParallel`), `internal/ssh`

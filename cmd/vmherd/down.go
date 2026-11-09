@@ -36,8 +36,8 @@ func newDownCmd() *cobra.Command {
 				runningVMs = append(runningVMs, vmConfig)
 			}
 
-			if err := stopVMsGracefully(project, runningVMs); err != nil {
-				return err
+			if _, err := stopVMsGracefully(project, runningVMs); err != nil {
+				return incompleteCommandError("down", err)
 			}
 			ui.Println("All VMs stopped.")
 			return nil

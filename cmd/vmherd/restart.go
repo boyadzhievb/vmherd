@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/boyadzhievb/vmherd/internal/config"
@@ -38,15 +39,13 @@ Examples:
 				return err
 			}
 
-			restartedVMs, err := stopAndStartVMs(project, vmsToRestart)
+			restartedVMs, restartErr, err := stopAndStartVMs(project, vmsToRestart)
 			if err != nil {
 				return err
 			}
-
-			if len(restartedVMs) > 0 {
-				restartedVMs = waitForAddresses(project, restartedVMs)
-				waitForSSHInParallel(restartedVMs, keyPath, project.Herdfile.SSH.User)
-				startPortForwardingForVMs(project, restartedVMs)
+			_, readyErr := waitForVMsReady(project, restartedVMs, keyPath)
+			if err := incompleteCommandError("restart", errors.Join(restartErr, readyErr)); err != nil {
+				return err
 			}
 
 			ui.Println("Restart complete.")
@@ -55,46 +54,47 @@ Examples:
 	}
 }
 
-// stopAndStartVMs gracefully stops running VMs (in parallel, forcing only
-// after the shutdown timeout), then starts all VMs. Returns the started VMs.
-func stopAndStartVMs(project *config.Project, vms []config.VM) ([]config.VM, error) {
-	var runningVMs []config.VM
-	var stoppedVMs []config.VM
-
-	for _, vmConfig := range vms {
-		domainName := project.DomainName(vmConfig.Name)
-		state, err := vm.State(domainName)
-		if err != nil {
-			return nil, fmt.Errorf("cannot restart %s: %w", vmConfig.Name, err)
-		}
-
-		switch state {
-		case vm.StateNotCreated:
-			return nil, fmt.Errorf("cannot restart %s: VM does not exist — run 'vmherd up %s' first", vmConfig.Name, vmConfig.Name)
-		case vm.StateStopped:
-			stoppedVMs = append(stoppedVMs, vmConfig)
-		default:
-			// Running, paused, crashed, sleeping or shutting down:
-			// stopVMsGracefully brings each of these to power-off.
-			runningVMs = append(runningVMs, vmConfig)
-		}
+// stopAndStartVMs gracefully stops powered-on VMs (in parallel, forcing only
+// after the shutdown timeout), then starts every VM that is off. It returns
+// the started VMs and the joined errors of VMs that could not be stopped or
+// started; err is set only when nothing was attempted.
+func stopAndStartVMs(project *config.Project, vms []config.VM) (startedVMs []config.VM, vmFailures error, err error) {
+	poweredOnVMs, stoppedVMs, err := splitVMsByPower(project, vms)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	if err := stopVMsGracefully(project, runningVMs); err != nil {
-		return nil, fmt.Errorf("cannot restart: %w", err)
-	}
+	nowStoppedVMs, stopErr := stopVMsGracefully(project, poweredOnVMs)
+	failures := []error{stopErr}
 
-	allVMs := append(runningVMs, stoppedVMs...)
-	var startedVMs []config.VM
-
-	for _, vmConfig := range allVMs {
-		domainName := project.DomainName(vmConfig.Name)
+	for _, vmConfig := range append(nowStoppedVMs, stoppedVMs...) {
 		ui.Printf("Starting %s...\n", vmConfig.Name)
-		if err := vm.Start(domainName); err != nil {
-			return nil, fmt.Errorf("cannot start %s: %w", vmConfig.Name, err)
+		if err := vm.Start(project.DomainName(vmConfig.Name)); err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", vmConfig.Name, err))
+			continue
 		}
 		startedVMs = append(startedVMs, vmConfig)
 	}
+	return startedVMs, errors.Join(failures...), nil
+}
 
-	return startedVMs, nil
+// splitVMsByPower sorts VMs into those still powered on in any way (running,
+// paused, crashed, sleeping, shutting down) and those shut off. A VM that
+// doesn't exist is an error, before anything is stopped.
+func splitVMsByPower(project *config.Project, vms []config.VM) (poweredOnVMs, stoppedVMs []config.VM, err error) {
+	for _, vmConfig := range vms {
+		state, err := vm.State(project.DomainName(vmConfig.Name))
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot restart %s: %w", vmConfig.Name, err)
+		}
+		switch state {
+		case vm.StateNotCreated:
+			return nil, nil, fmt.Errorf("cannot restart %s: VM does not exist — run 'vmherd up %s' first", vmConfig.Name, vmConfig.Name)
+		case vm.StateStopped:
+			stoppedVMs = append(stoppedVMs, vmConfig)
+		default:
+			poweredOnVMs = append(poweredOnVMs, vmConfig)
+		}
+	}
+	return poweredOnVMs, stoppedVMs, nil
 }

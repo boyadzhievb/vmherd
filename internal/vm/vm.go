@@ -150,7 +150,7 @@ func RemoveDisk(diskPath string) error {
 	unlinkCmd.Stdout = ui.Stdout()
 	unlinkCmd.Stderr = ui.Stderr()
 	if err := unlinkCmd.Run(); err != nil {
-		return fmt.Errorf("removing disk %s: %w", diskPath, err)
+		return fmt.Errorf("removing disk %s: %w — remove it by hand with: sudo rm %s", diskPath, err, diskPath)
 	}
 	return nil
 }

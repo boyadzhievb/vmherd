@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -58,11 +59,11 @@ func withCurrentAddress(project *config.Project, vmConfig config.VM) (config.VM,
 	return vmConfig, nil
 }
 
-// waitForAddresses returns copies of vms with Network.IP set to the address
-// to connect to, waiting in parallel (each VM with its own deadline) for the
-// DHCP leases of booting VMs. A DHCP VM that gets no lease keeps no address,
-// so later SSH steps skip it, and a warning names it.
-func waitForAddresses(project *config.Project, vms []config.VM) []config.VM {
+// waitForAddresses returns copies of the VMs that have an address to connect
+// to, with Network.IP set, waiting in parallel (each VM with its own deadline)
+// for the DHCP leases of booting VMs. VMs that get no lease are left out and
+// their errors are returned joined.
+func waitForAddresses(project *config.Project, vms []config.VM) ([]config.VM, error) {
 	resolvedVMs := slices.Clone(vms)
 	leaseErrors := make([]error, len(vms))
 	group := new(errgroup.Group)
@@ -78,25 +79,26 @@ func waitForAddresses(project *config.Project, vms []config.VM) []config.VM {
 		})
 	}
 	if !waitingForLease {
-		return resolvedVMs
+		return resolvedVMs, nil
 	}
 
 	ui.Println("\nWaiting for DHCP leases...")
 	if err := group.Wait(); err != nil {
-		ui.Printf("Warning: waiting for DHCP leases: %v\n", err)
+		return nil, fmt.Errorf("waiting for DHCP leases: %w", err)
 	}
+	var addressedVMs []config.VM
 	for index, vmConfig := range vms {
-		if !usesDHCP(vmConfig) {
-			continue
-		}
 		if leaseErrors[index] != nil {
 			ui.Printf("  %s... no lease\n", vmConfig.Name)
-			ui.Printf("Warning: VM %s: %v\n", vmConfig.Name, leaseErrors[index])
+			leaseErrors[index] = fmt.Errorf("%s: %w", vmConfig.Name, leaseErrors[index])
 			continue
 		}
-		ui.Printf("  %s... %s\n", vmConfig.Name, resolvedVMs[index].Network.IP)
+		if usesDHCP(vmConfig) {
+			ui.Printf("  %s... %s\n", vmConfig.Name, resolvedVMs[index].Network.IP)
+		}
+		addressedVMs = append(addressedVMs, resolvedVMs[index])
 	}
-	return resolvedVMs
+	return addressedVMs, errors.Join(leaseErrors...)
 }
 
 // waitForLease polls the domain's DHCP lease with exponential backoff for up
