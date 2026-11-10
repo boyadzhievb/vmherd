@@ -158,3 +158,36 @@ func TestNoNinePCheckWithoutShares(t *testing.T) {
 		t.Errorf("sharedMountRuncmds(nil) = %q, want none", runcmds)
 	}
 }
+
+// shellStep returns a shell provisioning step with the default options.
+func shellStep(script string) config.Provision {
+	return config.Provision{Type: config.ProvisionShell, Inline: script}
+}
+
+// TestShellStepStopsAtFirstFailure checks M1.16: a script whose first command
+// fails and whose last succeeds fails the step by default (bash -e -o
+// pipefail, also for a failing command inside a pipe), and succeeds with
+// errexit: false, as plain bash (Vagrant) would.
+func TestShellStepStopsAtFirstFailure(t *testing.T) {
+	plainBash := false
+	for _, testCase := range []struct {
+		name       string
+		step       config.Provision
+		wantFailed bool
+	}{
+		{"default, failing first command", shellStep("false\necho last-command-ran"), true},
+		{"default, failure inside a pipe", shellStep("false | cat\necho last-command-ran"), true},
+		{"errexit false, plain bash", config.Provision{Type: config.ProvisionShell, Inline: "false\necho last-command-ran", Errexit: &plainBash}, false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			exitCode, output := runRuncmdScript(t, buildRuncmdLines([]config.Provision{testCase.step}, "vmherd", nil))
+			stepFailed := strings.Contains(output, FailedStepMarker)
+			if stepFailed != testCase.wantFailed || (exitCode != 0) != testCase.wantFailed {
+				t.Errorf("exit %d, step failed = %v, want failed = %v; output:\n%s", exitCode, stepFailed, testCase.wantFailed, output)
+			}
+			if ranLastCommand := strings.Contains(output, "last-command-ran"); ranLastCommand == testCase.wantFailed {
+				t.Errorf("last command ran = %v, want %v; output:\n%s", ranLastCommand, !testCase.wantFailed, output)
+			}
+		})
+	}
+}

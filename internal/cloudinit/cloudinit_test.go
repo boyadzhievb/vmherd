@@ -489,7 +489,7 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 	wantRuncmdLines := []string{
 		"vmherd_failed_step=",
 		bashCommandLine(`chown vmherd: "$(getent passwd vmherd | cut -d: -f6)"`),
-		guardedStepLine("1 of 2", "apt-get update"),
+		guardedStepLine("1 of 2", shellStep("apt-get update")),
 		bashCommandLine(ninePSupportCheckCommand()),
 		bashCommandLine("mkdir -p '/vagrant'"),
 		bashCommandLine("mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'"),
@@ -528,7 +528,7 @@ func TestMultiLineInlineCommandWrappedInBash(t *testing.T) {
 	content := string(data)
 
 	// The whole script is one runcmd entry run by bash, not one entry per line.
-	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", multiLineScript))
+	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", shellStep(multiLineScript)))
 
 	// The individual lines of the script must NOT appear as separate runcmd entries.
 	lines := strings.Split(content, "\n")
@@ -570,7 +570,7 @@ func TestSingleLineCommandWrappedInBash(t *testing.T) {
 	}
 	content := string(data)
 
-	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", "apt-get update"))
+	assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", shellStep("apt-get update")))
 	if !strings.Contains(content, "apt-get update") {
 		t.Error("single-line command content should be present")
 	}
@@ -616,7 +616,7 @@ func TestYAMLSpecialCharactersInCommand(t *testing.T) {
 
 			// Decoding user-data must give back exactly the guarded line, so the
 			// YAML-special characters stayed inside the entry.
-			assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", tc.command))
+			assertRuncmdHasLines(t, files.UserData, guardedStepLine("1 of 1", shellStep(tc.command)))
 
 			// The command must NOT appear as a bare YAML string (  - <command>).
 			bareEntry := "  - " + tc.command + "\n"

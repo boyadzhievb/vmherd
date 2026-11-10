@@ -94,6 +94,18 @@ type Provision struct {
 	Inline      string        `yaml:"inline"`      // shell commands to run (shell type)
 	Source      string        `yaml:"source"`      // local file path (file type)
 	Destination string        `yaml:"destination"` // guest file path (file type)
+	Errexit     *bool         `yaml:"errexit"`     // shell: stop at the first failing command (default true; false = plain bash)
+}
+
+// BashOptions returns the bash options a shell step runs with, on first boot
+// and in 'vmherd provision' alike: -e -o pipefail (stop at the first failing
+// command, also inside a pipe, as GitHub Actions does) unless the step sets
+// errexit: false (plain bash, where only the last command's status counts).
+func (step Provision) BashOptions() []string {
+	if step.Errexit != nil && !*step.Errexit {
+		return nil
+	}
+	return []string{"-e", "-o", "pipefail"}
 }
 
 // VMNames returns the names of all VMs in the Herdfile, in declaration order.

@@ -73,11 +73,11 @@ func RunCommandWithTimeout(keyPath, user, ip, commandLine string, timeout time.D
 	return string(output), 0, nil
 }
 
-// RunScriptAsRoot runs a shell script on a VM as root via 'sudo bash -c'.
-// The script travels as one quoted argument, so the remote shell can't split
-// it, and stdin stays free for commands in the script.
-func RunScriptAsRoot(keyPath, user, ip, script string) error {
-	args := append(sshBaseArgs(keyPath, user, ip), rootScriptCommandLine(script))
+// RunScriptAsRoot runs a shell script on a VM as root via 'sudo bash', with
+// bashOptions (e.g. -e -o pipefail) before -c. The script travels as one
+// quoted argument, so the remote shell can't split it, and stdin stays free.
+func RunScriptAsRoot(keyPath, user, ip, script string, bashOptions []string) error {
+	args := append(sshBaseArgs(keyPath, user, ip), rootScriptCommandLine(script, bashOptions))
 
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = os.Stdout
@@ -151,9 +151,14 @@ func installUploadCommandLine(uploadPath, destination, fileMode string) string {
 		quoteForShell(fileMode), quotedUpload, quoteForShell(destination), quotedUpload)
 }
 
-// rootScriptCommandLine returns the remote command line that runs script as root.
-func rootScriptCommandLine(script string) string {
-	return "sudo bash -c " + quoteForShell(script)
+// rootScriptCommandLine returns the remote command line that runs script as
+// root with bash and bashOptions. The options are fixed flags, not user input.
+func rootScriptCommandLine(script string, bashOptions []string) string {
+	optionsPrefix := ""
+	if len(bashOptions) > 0 {
+		optionsPrefix = strings.Join(bashOptions, " ") + " "
+	}
+	return "sudo bash " + optionsPrefix + "-c " + quoteForShell(script)
 }
 
 // remoteCommandLine turns 'vmherd ssh -- ...' arguments into the command line

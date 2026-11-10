@@ -99,7 +99,7 @@ func provisionVM(project *config.Project, vmConfig config.VM, keyPath, sshUser s
 func provisionShellStep(keyPath, sshUser string, vmConfig config.VM, step config.Provision, stepNumber, totalSteps int) error {
 	ui.Printf("  step %d/%d: shell...", stepNumber, totalSteps)
 
-	if err := ssh.RunScriptAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Inline); err != nil {
+	if err := ssh.RunScriptAsRoot(keyPath, sshUser, vmConfig.Network.IP, step.Inline, step.BashOptions()); err != nil {
 		ui.Println(" failed")
 		return fmt.Errorf("VM %q: shell provisioning step %d failed: %w", vmConfig.Name, stepNumber, err)
 	}

@@ -55,18 +55,19 @@ func provisionStepLines(provisions []config.Provision) []string {
 			continue
 		}
 		stepLabel := fmt.Sprintf("%d of %d", stepIndex+1, len(provisions))
-		stepLines = append(stepLines, guardedStepLine(stepLabel, step.Inline))
+		stepLines = append(stepLines, guardedStepLine(stepLabel, step))
 	}
 	return stepLines
 }
 
-// guardedStepLine runs script with bash unless an earlier step failed, and
+// guardedStepLine runs the step's script with bash (and the step's options,
+// see config.Provision.BashOptions) unless an earlier step failed, and
 // records stepLabel plus the exit code in failedStepVariable if it fails.
-func guardedStepLine(stepLabel, script string) string {
+func guardedStepLine(stepLabel string, step config.Provision) string {
 	return fmt.Sprintf(`[ -n "$%s" ] || { echo %s; %s; } || %s="%s (exit $?)"`,
 		failedStepVariable,
 		quoteForShell(fmt.Sprintf("vmherd: running provisioning step %s", stepLabel)),
-		bashCommandLine(script),
+		bashCommandLineWithOptions(step.BashOptions(), step.Inline),
 		failedStepVariable, stepLabel)
 }
 
@@ -80,7 +81,17 @@ func failedStepCheckLine() string {
 // bashCommandLine returns a shell line that runs script with bash, the way
 // cloud-init renders a ["/bin/bash", "-c", script] runcmd entry.
 func bashCommandLine(script string) string {
-	return "/bin/bash -c " + quoteForShell(strings.TrimSpace(script))
+	return bashCommandLineWithOptions(nil, script)
+}
+
+// bashCommandLineWithOptions returns a shell line that runs script with bash
+// and the given options (e.g. -e -o pipefail) before -c.
+func bashCommandLineWithOptions(bashOptions []string, script string) string {
+	optionsPrefix := ""
+	if len(bashOptions) > 0 {
+		optionsPrefix = strings.Join(bashOptions, " ") + " "
+	}
+	return "/bin/bash " + optionsPrefix + "-c " + quoteForShell(strings.TrimSpace(script))
 }
 
 // writeRuncmdSection appends the runcmd section to user-data.

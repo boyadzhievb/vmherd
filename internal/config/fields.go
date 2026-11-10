@@ -176,6 +176,9 @@ func validateFileProvisionStep(stepLabel string, step Provision) []error {
 	if step.Inline != "" {
 		problems = append(problems, fmt.Errorf("%s (file) has 'inline', which only shell steps use — use a separate type: shell step", stepLabel))
 	}
+	if step.Errexit != nil {
+		problems = append(problems, fmt.Errorf("%s (file) has 'errexit', which only shell steps use — remove it", stepLabel))
+	}
 	switch {
 	case step.Destination == "":
 		problems = append(problems, fmt.Errorf("%s (file) has no 'destination' — the absolute path in the VM, e.g. /tmp/setup.sh", stepLabel))

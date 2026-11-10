@@ -98,3 +98,28 @@ func TestValidateBaseHerdfileIsValid(t *testing.T) {
 		t.Fatalf("base Herdfile is invalid: %v", err)
 	}
 }
+
+// TestProvisionErrexit checks M1.16's config side: shell steps default to
+// -e -o pipefail, errexit: false gives plain bash, and errexit on a file
+// step is reported.
+func TestProvisionErrexit(t *testing.T) {
+	plainBash, strict := false, true
+	if got := strings.Join(Provision{Type: ProvisionShell}.BashOptions(), " "); got != "-e -o pipefail" {
+		t.Errorf("default BashOptions() = %q, want -e -o pipefail", got)
+	}
+	if got := (Provision{Type: ProvisionShell, Errexit: &strict}).BashOptions(); len(got) != 3 {
+		t.Errorf("errexit: true BashOptions() = %q, want -e -o pipefail", got)
+	}
+	if got := (Provision{Type: ProvisionShell, Errexit: &plainBash}).BashOptions(); len(got) != 0 {
+		t.Errorf("errexit: false BashOptions() = %q, want none", got)
+	}
+
+	fileStep := Provision{Type: ProvisionFile, Source: "./setup.sh", Destination: "/tmp/setup.sh", Errexit: &plainBash}
+	problems := validateProvisionStep("ctrl", 2, fileStep)
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "'errexit', which only shell steps use") {
+		t.Errorf("file step with errexit: problems = %v", problems)
+	}
+	if problems := validateProvisionStep("ctrl", 1, Provision{Type: ProvisionShell, Inline: "true", Errexit: &plainBash}); len(problems) != 0 {
+		t.Errorf("shell step with errexit: false: unexpected problems %v", problems)
+	}
+}

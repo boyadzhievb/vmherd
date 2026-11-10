@@ -144,7 +144,7 @@ func TestRootScriptCommandLineSurvivesShell(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	script := "set -u\nfirst='it'\"'\"'s'\nsecond=\"$first & more\"\necho \"$second\" && echo done\n"
-	commandLine := rootScriptCommandLine(script)
+	commandLine := rootScriptCommandLine(script, nil)
 	if !strings.HasPrefix(commandLine, "sudo bash -c ") {
 		t.Fatalf("expected a sudo bash -c command line, got %s", commandLine)
 	}
@@ -254,5 +254,28 @@ func TestTunnelArgs(t *testing.T) {
 	}
 	if args[len(args)-1] != "vmherd@192.168.150.10" {
 		t.Errorf("destination must come last (options after it would be a remote command), got %q", args[len(args)-1])
+	}
+}
+
+// TestRootScriptCommandLineStopsAtFirstFailure checks the 'vmherd provision'
+// path (M1.16): with -e -o pipefail a script whose first command fails exits
+// non-zero before its last command; without options plain bash succeeds.
+func TestRootScriptCommandLineStopsAtFirstFailure(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	script := "false\necho last-command-ran\n"
+	for _, testCase := range []struct {
+		bashOptions []string
+		wantFailed  bool
+	}{
+		{[]string{"-e", "-o", "pipefail"}, true},
+		{nil, false},
+	} {
+		localCommandLine := "env" + strings.TrimPrefix(rootScriptCommandLine(script, testCase.bashOptions), "sudo")
+		output, err := exec.Command("sh", "-c", localCommandLine).CombinedOutput()
+		if (err != nil) != testCase.wantFailed || strings.Contains(string(output), "last-command-ran") == testCase.wantFailed {
+			t.Errorf("options %q: err = %v, output = %q; want failed = %v", testCase.bashOptions, err, output, testCase.wantFailed)
+		}
 	}
 }
