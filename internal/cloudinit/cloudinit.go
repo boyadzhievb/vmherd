@@ -154,11 +154,26 @@ func homeOwnershipCommand(sshUser string) string {
 // every read.
 const sharedMountOptions = "trans=virtio,version=9p2000.L,noatime,nofail"
 
-// sharedMountRuncmds returns the commands that create each share's mount
-// point and mount it if the mounts module didn't already (a second mount
-// would fail and mark the whole cloud-init run as failed).
+// MissingNinePMarker starts the line the runcmd script prints to stderr when
+// the guest kernel has no 9p support (RHEL-family kernels: Rocky, AlmaLinux),
+// so the host can name that cause instead of showing mount's error.
+const MissingNinePMarker = "vmherd: shared folders need 9p"
+
+// ninePSupportCheckCommand loads the 9p module and, if the kernel still lists
+// no 9p filesystem, prints MissingNinePMarker and fails.
+func ninePSupportCheckCommand() string {
+	return fmt.Sprintf(`modprobe -q 9p; grep -qw 9p /proc/filesystems || { echo %s >&2; exit 1; }`,
+		quoteForShell(MissingNinePMarker+", which this guest kernel does not have"))
+}
+
+// sharedMountRuncmds returns the 9p support check, then the commands that
+// create each share's mount point and mount it if the mounts module didn't
+// already (a second mount would fail and mark the whole run as failed).
 func sharedMountRuncmds(sharedMounts []SharedMount) []string {
-	var runcmds []string
+	if len(sharedMounts) == 0 {
+		return nil
+	}
+	runcmds := []string{ninePSupportCheckCommand()}
 	for _, mount := range sharedMounts {
 		quotedGuestPath := quoteForShell(mount.GuestPath)
 		runcmds = append(runcmds,

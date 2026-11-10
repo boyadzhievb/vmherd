@@ -17,11 +17,11 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 18 | 16 |
+| M1 | Correctness of existing features | 18 | 17 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
-| M5 | Bridge networking (feature, v0.4.0) | 1 | 1 |
+| M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 
 ---
 
@@ -293,12 +293,14 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Done when:** `virt-install` is not called anywhere. Unit tests: golden XML per distro (shares + seclabel, console log, static and DHCP VMs) and a round trip that reads the seed back (label `cidata`, three file names, contents). Testbed: four VMs created in one `up` show no traceback; Ubuntu, Debian, Fedora, Rocky/Alma and Arch boot and get their network (static and DHCP); `/vagrant` (M0.10) mounts; the console log is written; graceful `down` and `restart` work; `reload` reruns cloud-init; a forced partial failure leaves nothing behind; `destroy` leaves no seed file.
   - **Result (2026-11-09):** `virt-install` fully replaced. VMs are created by rendering domain XML via `encoding/xml` structs (`internal/vm/domain.go`) and defining/starting via `virsh define`/`start`. Cloud-init seed ISOs are built in pure Go (`internal/cloudinit/iso.go`) with Rock Ridge NM/PX extensions for filenames with hyphens. `OSVariant` removed from the image registry. `virsh undefine` no longer uses `--remove-all-storage` (disks are created outside libvirt's pool); explicit `sudo unlink` handles disk cleanup. `destroy` and `reload` both clean up disk and seed. Rollback on partial failure removes disk, seed and domain. Golden XML tests for 4 VM configurations. Testbed (.71, Debian trixie): 2 Ubuntu noble VMs — `up` (parallel create, SSH ready), `status`, `ssh`, shared folders (`/vagrant`), port forwarding, `down`/`up` restart, `reload` (destroys and recreates cleanly), `destroy` (no orphaned files). Multi-distro testing deferred.
 
-- [ ] **M1.18 — 🧭 The default `/vagrant` share fails on Rocky/AlmaLinux (no 9p in RHEL kernels)** · Med
+- [x] **M1.18 — 🧭 The default `/vagrant` share fails on Rocky/AlmaLinux (no 9p in RHEL kernels)** · Med
   - **Files:** `internal/vm/domain.go` (filesystem devices), `internal/cloudinit/cloudinit.go` (mounts), `cmd/vmherd/up.go`, README/CLAUDE.md (shared folders)
   - **Problem:** Found in M1.14 (2026-11-10, .71). RHEL 9 kernels (Rocky, Alma) are built without 9p: `modprobe 9p`/`9pnet_virtio` → "not found" (`kernel/fs/` has `fuse` (virtiofs), `nfs`, `smb`, no `9p`). With the default share, cloud-init's `mount -a` fails with `unknown filesystem type '9p'`, first boot ends in `status: error` and `up` exits 1 for that VM. SSH works; `shared_folders: []` avoids it. Fedora's kernel has 9p.
   - **How Vagrant does it:** vagrant-libvirt's default synced folder is NFS (host NFS server, `/etc/exports` edited with sudo), with rsync as the fallback; 9p and virtiofs are opt-in.
   - **Decision needed:** (a) virtiofs for VMs whose kernel lacks 9p — needs the user-run virtiofsd from the M0.10 deferral; (b) NFS like vagrant-libvirt — host NFS server + exports, UID mapping; (c) rsync one-way copy at `up`/`reload`; (d) at minimum: detect the 9p failure and say "this image's kernel has no 9p support — set `shared_folders: []` for this VM", and document it.
   - **Done when:** depends on the decision; at minimum `up` on alma with the default share names the cause and the workaround.
+  - **Decision (2026-11-10):** virtiofs stays deferred (the M0.10 attempt was messy: root `virtiofsd`, setuid-root escape, libvirt 9.0 limits). Do (d) now; add opt-in share types `rsync` (M5.3) and `nfs` (M5.4, the user runs the NFS server, vmherd writes `/etc/exports.d/`). A share without `type` stays 9p; no silent fallback.
+  - **Result (2026-11-10):** The share runcmd now starts with one check line (`ninePSupportCheckCommand`): `modprobe -q 9p`, then `grep -qw 9p /proc/filesystems`, else it prints `MissingNinePMarker` ("vmherd: shared folders need 9p, which this guest kernel does not have") to stderr and fails. VMs without shares get no check. On a failed first boot, `describeFirstBootFailure` looks for the marker (`cloudinit.ReportsMissingNineP`) and reports `shared folders can't be mounted: <vm>'s kernel has no 9p support (RHEL-family kernels such as Rocky and AlmaLinux are built without it) — set 'shared_folders: []' for <vm> in the Herdfile and run 'vmherd reload <vm>'` instead of the cloud-init status dump; a failed provisioning step still comes first, the 9p cause under it (`also:`). Matching our own marker, not mount's error text, keeps it locale-independent. README and CLAUDE.md shared-folder sections mention it. Tests: marker detection (and no false match on another mount error), the check prints the marker, no check without shares, exact runcmd order, summary alone and under a step failure. Verified on .71: alma (default share + a provisioning step) and ubuntu (default share) together — alma fails with the new one-line cause, its provisioning step still ran; ubuntu passes the check, `/vagrant` is mounted with the project file, status done; after `shared_folders: []`, `reload alma` finishes cleanly (exit 0).
 
 Note: the default network name collision is handled under M1.2.
 
@@ -522,3 +524,16 @@ Note: the default network name collision is handled under M1.2.
     - The `.100–.200` reserved-range check only applies to NAT, where vmherd's own dnsmasq owns that pool.
     - `cloudinit.GenerateFiles` now takes the default gateway instead of a subnet base (the NAT `.1` rule moved to `Project.GatewayIP`).
   - **Done when:** `go test ./...` passes with bridge validation, domain-XML golden and DHCP-pool tests; smoke-tested on a testbed with a real bridge. Released as v0.4.0.
+
+- [ ] **M5.2 — Stable MAC per VM and DHCP reservations for `ip:` (NAT)** · Feature — *proposed 2026-11-10, design not yet written; see the session notes (stable MAC from project hash + VM name with optional `mac:`; `<host mac ip>` reservations via `virsh net-update`; bridge mode keeps static config).*
+
+- [ ] **M5.3 — `type: rsync` shared folders (one-way copy over SSH)** · Feature
+  - **Why:** Guests without 9p (Rocky, AlmaLinux — M1.18) and users who don't want the guest writing to the host. Vagrant equivalent: `type: "rsync"` with `vagrant rsync` / `rsync-auto`.
+  - **Design (to refine before building):** per-share `type: rsync`; vmherd copies host → guest over its existing SSH key at `up`/`reload` (after SSH is ready, before provisioning steps that may need the files) and on `vmherd rsync [vm...]`. Guest changes never come back — `up` says so when it prints the share. Excludes (`.git`?) and `--delete` behaviour to decide. Needs `rsync` on host and guest (check both, actionable error).
+  - **Done when:** an alma VM with `type: rsync` gets the project at `/vagrant` on `up`, `vmherd rsync` pushes a change, tests cover config parsing and command building.
+
+- [ ] **M5.4 — `type: nfs` shared folders (the user runs the NFS server)** · Feature
+  - **Why:** A live two-way share for guests without 9p. Vagrant equivalent: vagrant-libvirt's default NFS synced folders.
+  - **Decision (2026-11-10):** the user installs and starts the NFS server (vmherd checks it is running and otherwise refuses, naming the package/command); vmherd writes one file per project, `/etc/exports.d/vmherd-<project>.exports`, with sudo and runs `exportfs -ra`; `destroy` removes it. Nothing else in `/etc/exports` is touched.
+  - **Design (to refine):** NFSv4 only (port 2049, no rpcbind); export to the project subnet only; `rw,all_squash,anonuid=<host uid>,anongid=<host gid>,no_subtree_check` so every guest write (root's too) becomes the host user — same guarantee as 9p `squash`. To check on the testbed: NFS client in each cloud image (Ubuntu may lack `nfs-common` — air-gap concern), host firewall (ufw/firewalld) on the libvirt bridge.
+  - **Done when:** an alma VM with `type: nfs` mounts the project read-write with host-user ownership; `destroy` removes the exports file; a missing NFS server gives an actionable error.

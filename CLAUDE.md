@@ -95,6 +95,7 @@ Decision (2026-11-04, remediation item M0.7): every VM shares the project direct
 - `vmherd up` prints every share it creates (`<vm>: sharing <host> → <guest> (read-write)`).
 - Host paths must resolve inside the project or `$HOME` (`allow_outside_home: true` per entry for others). `/`, `$HOME` itself and system directories are always refused.
 - **How shares work (M0.10, 2026-11-04):** 9p with `accessmode=squash`. For VMs with shares, QEMU runs as the invoking host user plus the group of `/dev/kvm` (libvirt DAC `<seclabel type='static' model='dac' label='+UID:+GID' relabel='yes'>`). The guest SSH user gets the host UID. Files then have the same owner and real modes on both sides, and guest root can't create root-owned files on the host. VMs without shares keep libvirt's default QEMU user. vmherd refuses to run as root. No host ACLs or permission changes are needed.
+- **No 9p on RHEL-family guests (M1.18, 2026-11-10):** Rocky/AlmaLinux kernels are built without 9p. The share runcmd checks `/proc/filesystems` first and prints a marker; `up` turns it into "no 9p support — set `shared_folders: []`". Planned: opt-in `type: rsync` and `type: nfs` shares (M5.3/M5.4); virtiofs stays deferred.
 - **Remaining risk (documented, accepted):** guest root can create a file that's setuid to the host user. Other host users who can reach the project folder could run it as that user.
 - virtiofs is deferred: libvirt's root `virtiofsd` lets guest root plant setuid-root files. Revisit with a user-run Rust `virtiofsd` (see milestone.md M0.10).
 

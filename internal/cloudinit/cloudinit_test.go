@@ -490,6 +490,7 @@ func TestGenerateFilesWithSharedMountsAndProvisioning(t *testing.T) {
 		"vmherd_failed_step=",
 		bashCommandLine(`chown vmherd: "$(getent passwd vmherd | cut -d: -f6)"`),
 		guardedStepLine("1 of 2", "apt-get update"),
+		bashCommandLine(ninePSupportCheckCommand()),
 		bashCommandLine("mkdir -p '/vagrant'"),
 		bashCommandLine("mountpoint -q '/vagrant' || mount -t 9p -o trans=virtio,version=9p2000.L,noatime,nofail vmherd_share_0 '/vagrant'"),
 		failedStepCheckLine(),
@@ -806,7 +807,7 @@ func TestGenerateFilesWithoutSharesHasNoHomeFixOrRuncmd(t *testing.T) {
 func TestSharedMountRuncmdsQuoteGuestPath(t *testing.T) {
 	runcmds := sharedMountRuncmds([]SharedMount{{MountTag: "vmherd_share_0", GuestPath: "/home/me/my app's"}})
 	wantMount := `mountpoint -q '/home/me/my app'\''s' || mount -t 9p -o ` + sharedMountOptions + ` vmherd_share_0 '/home/me/my app'\''s'`
-	if len(runcmds) != 2 || runcmds[0] != `mkdir -p '/home/me/my app'\''s'` || runcmds[1] != wantMount {
+	if len(runcmds) != 3 || runcmds[0] != ninePSupportCheckCommand() || runcmds[1] != `mkdir -p '/home/me/my app'\''s'` || runcmds[2] != wantMount {
 		t.Errorf("sharedMountRuncmds() = %q", runcmds)
 	}
 }

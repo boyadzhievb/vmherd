@@ -68,3 +68,14 @@ func FailedStepLine(logExcerpt string) string {
 	}
 	return ""
 }
+
+// ReportsMissingNineP reports whether the log excerpt contains the line the
+// runcmd script prints when the guest kernel has no 9p support.
+func ReportsMissingNineP(logExcerpt string) bool {
+	for _, line := range strings.Split(logExcerpt, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), MissingNinePMarker) {
+			return true
+		}
+	}
+	return false
+}

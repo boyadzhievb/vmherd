@@ -132,3 +132,29 @@ func TestFailedStepLineFromScriptOutput(t *testing.T) {
 		t.Errorf("FailedStepLine() without a failed step = %q, want empty", gotLine)
 	}
 }
+
+// TestReportsMissingNineP checks that the marker printed by the 9p check is
+// found in a cloud-init log excerpt, and that ordinary mount errors are not
+// mistaken for it.
+func TestReportsMissingNineP(t *testing.T) {
+	logExcerpt := "Cloud-init v. 24.4 running 'modules:final'\n" +
+		MissingNinePMarker + ", which this guest kernel does not have\n" +
+		"mount: /vagrant: unknown filesystem type '9p'.\n"
+	if !ReportsMissingNineP(logExcerpt) {
+		t.Errorf("ReportsMissingNineP() = false for a log with the marker")
+	}
+	if ReportsMissingNineP("mount: /vagrant: special device vmherd_share_0 does not exist.\n") {
+		t.Errorf("ReportsMissingNineP() = true for a log without the marker")
+	}
+	if !strings.Contains(ninePSupportCheckCommand(), MissingNinePMarker) {
+		t.Errorf("ninePSupportCheckCommand() = %q, does not print the marker", ninePSupportCheckCommand())
+	}
+}
+
+// TestNoNinePCheckWithoutShares checks that VMs without shares get no 9p
+// check, so images without 9p still provision cleanly.
+func TestNoNinePCheckWithoutShares(t *testing.T) {
+	if runcmds := sharedMountRuncmds(nil); len(runcmds) != 0 {
+		t.Errorf("sharedMountRuncmds(nil) = %q, want none", runcmds)
+	}
+}

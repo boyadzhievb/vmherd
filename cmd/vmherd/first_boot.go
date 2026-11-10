@@ -106,12 +106,32 @@ func describeFirstBootFailure(vmConfig config.VM, keyPath, sshUser, statusOutput
 	}
 
 	summary := cloudinit.FailedStepLine(logExcerpt)
+	if cloudinit.ReportsMissingNineP(logExcerpt) {
+		summary = joinFailureSummaries(summary, missingNinePSummary(vmConfig.Name))
+	}
 	if summary == "" {
 		summary = "cloud-init reported an error:\n" + indentLines(strings.TrimSpace(statusOutput))
 	}
 	return fmt.Errorf("first-boot provisioning failed: %s\n  last %d lines of %s:\n%s\n  full log: vmherd ssh %s -- sudo cat %s",
 		summary, cloudInitLogTailLines, cloudinit.OutputLogPath, indentLines(strings.TrimRight(logExcerpt, "\n")),
 		vmConfig.Name, cloudinit.OutputLogPath)
+}
+
+// missingNinePSummary explains a share that can't be mounted because the
+// guest kernel lacks 9p, and how to bring the VM up without shares.
+func missingNinePSummary(vmName string) string {
+	return fmt.Sprintf("shared folders can't be mounted: %s's kernel has no 9p support "+
+		"(RHEL-family kernels such as Rocky and AlmaLinux are built without it) — "+
+		"set 'shared_folders: []' for %s in the Herdfile and run 'vmherd reload %s'", vmName, vmName, vmName)
+}
+
+// joinFailureSummaries puts a second failure cause under the first, or
+// returns it alone when there is no first one.
+func joinFailureSummaries(firstSummary, secondSummary string) string {
+	if firstSummary == "" {
+		return secondSummary
+	}
+	return firstSummary + "\n  also: " + secondSummary
 }
 
 // indentLines indents every line of text by four spaces, so a multi-line
