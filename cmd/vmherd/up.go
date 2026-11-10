@@ -8,7 +8,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
-	"github.com/boyadzhievb/vmherd/internal/network"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -45,11 +44,6 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			subnetBase, err := project.SubnetBase()
-			if err != nil {
-				return err
-			}
-
 			gatewayIP, err := project.GatewayIP()
 			if err != nil {
 				return err
@@ -67,11 +61,11 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			if err := network.Ensure(project.StateDir, project.Herdfile.Network.Name, subnetBase); err != nil {
+			if err := ensureProjectNetwork(project); err != nil {
 				return err
 			}
 
-			bringUp, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), subnetBase, dnsServer)
+			bringUp, err := bringUpVMs(project, vms, strings.TrimSpace(pubKey), gatewayIP, dnsServer)
 			if err != nil {
 				return err
 			}
@@ -93,7 +87,7 @@ type bringUpResult struct {
 // bringUpVMs starts or resumes existing VMs, then creates missing VMs in
 // parallel. Every VM is attempted; per-VM failures go into the result. err is
 // set only for failures that stop all VMs (libvirt unreachable, image download).
-func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dnsServer string) (bringUpResult, error) {
+func bringUpVMs(project *config.Project, vms []config.VM, pubKey, defaultGateway, dnsServer string) (bringUpResult, error) {
 	result := bringUpResult{createdVMNames: make(map[string]bool)}
 	var vmsToCreate []config.VM
 	var failures []error
@@ -126,7 +120,7 @@ func bringUpVMs(project *config.Project, vms []config.VM, pubKey, subnetBase, dn
 		if err != nil {
 			return bringUpResult{}, err
 		}
-		for _, created := range createVMsInParallel(project, vmsToCreate, resolvedImages, pubKey, subnetBase, dnsServer) {
+		for _, created := range createVMsInParallel(project, vmsToCreate, resolvedImages, pubKey, defaultGateway, dnsServer) {
 			if created.err != nil {
 				ui.Printf("%s: creation failed (error below).\n", created.vmConfig.Name)
 				failures = append(failures, fmt.Errorf("%s: creating VM: %w", created.vmConfig.Name, created.err))
@@ -207,7 +201,7 @@ func createVMsInParallel(
 	project *config.Project,
 	vmsToCreate []config.VM,
 	resolvedImages map[string]resolvedImage,
-	pubKey, subnetBase, dnsServer string,
+	pubKey, defaultGateway, dnsServer string,
 ) []vmCreateResult {
 	results := make([]vmCreateResult, len(vmsToCreate))
 	group := new(errgroup.Group)
@@ -219,7 +213,7 @@ func createVMsInParallel(
 		group.Go(func() error {
 			results[i].err = createSingleVM(
 				project, vmConfig, resolvedImages[vmConfig.Image],
-				pubKey, subnetBase, dnsServer,
+				pubKey, defaultGateway, dnsServer,
 			)
 			return nil
 		})
@@ -234,7 +228,7 @@ func createSingleVM(
 	project *config.Project,
 	vmConfig config.VM,
 	img resolvedImage,
-	pubKey, subnetBase, dnsServer string,
+	pubKey, defaultGateway, dnsServer string,
 ) error {
 	domainName := project.DomainName(vmConfig.Name)
 
@@ -256,7 +250,7 @@ func createSingleVM(
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
 		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, pubKey,
-		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
+		defaultGateway, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
 	)
 	if err != nil {
 		return err
@@ -278,6 +272,7 @@ func createSingleVM(
 		DiskPath:         project.DiskPath(vmConfig.Name),
 		SeedPath:         seedPath,
 		NetworkName:      project.Herdfile.Network.Name,
+		BridgeName:       project.Herdfile.Network.Bridge,
 		MACAddress:       macAddress,
 		Memory:           vmConfig.Memory,
 		CPUs:             vmConfig.CPUs,

@@ -42,7 +42,7 @@ func newStatusCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n",
 					vmConfig.Name,
 					vmConfig.Image,
-					statusAddress(domainName, vmConfig, state),
+					statusAddress(domainName, vmConfig, state, projectAddressSource(project)),
 					state,
 				)
 			}
@@ -54,15 +54,16 @@ func newStatusCmd() *cobra.Command {
 }
 
 // statusAddress returns the IP column for 'vmherd status': the static ip, a
-// running DHCP VM's lease, "dhcp (no lease yet)" while it boots, or "dhcp".
-func statusAddress(domainName string, vmConfig config.VM, state vm.VMState) string {
+// running DHCP VM's current address, "dhcp (no lease yet)" while it boots,
+// or "dhcp".
+func statusAddress(domainName string, vmConfig config.VM, state vm.VMState, addressSource vm.AddressSource) string {
 	if !usesDHCP(vmConfig) {
 		return vmConfig.Network.IP
 	}
 	if !state.IsRunning() {
 		return "dhcp"
 	}
-	leasedAddress, err := vm.LeaseAddress(domainName)
+	leasedAddress, err := vm.DiscoveredAddress(domainName, addressSource)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		return "dhcp (unknown)"

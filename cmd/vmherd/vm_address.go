@@ -21,10 +21,21 @@ const (
 	leaseMaxPollInterval = 8 * time.Second
 )
 
-// usesDHCP reports whether a VM gets its address from the libvirt network's
-// DHCP server, which is the case when the Herdfile gives it no network.ip.
+// usesDHCP reports whether a VM gets its address from a DHCP server (the
+// libvirt network's, or the LAN's in bridge mode), which is the case when
+// the Herdfile gives it no network.ip.
 func usesDHCP(vmConfig config.VM) bool {
 	return vmConfig.Network.IP == ""
+}
+
+// projectAddressSource returns where 'virsh domifaddr' can see this project's
+// VM addresses: libvirt's own leases on a NAT network, the host's ARP table
+// for VMs bridged onto the LAN.
+func projectAddressSource(project *config.Project) vm.AddressSource {
+	if project.Herdfile.Network.IsBridge() {
+		return vm.AddressSourceARP
+	}
+	return vm.AddressSourceLease
 }
 
 // requireRunningVM returns an actionable error unless the VM's domain is
@@ -47,12 +58,12 @@ func withCurrentAddress(project *config.Project, vmConfig config.VM) (config.VM,
 	if !usesDHCP(vmConfig) {
 		return vmConfig, nil
 	}
-	leasedAddress, err := vm.LeaseAddress(project.DomainName(vmConfig.Name))
+	leasedAddress, err := vm.DiscoveredAddress(project.DomainName(vmConfig.Name), projectAddressSource(project))
 	if err != nil {
 		return vmConfig, fmt.Errorf("finding the address of VM %s: %w", vmConfig.Name, err)
 	}
 	if leasedAddress == "" {
-		return vmConfig, fmt.Errorf("VM %s gets its address from DHCP and has no lease yet — it may still be booting; wait a moment or run 'vmherd up %s'",
+		return vmConfig, fmt.Errorf("VM %s gets its address from DHCP and has no known address yet — it may still be booting; wait a moment or run 'vmherd up %s'",
 			vmConfig.Name, vmConfig.Name)
 	}
 	vmConfig.Network.IP = leasedAddress
@@ -74,7 +85,7 @@ func waitForAddresses(project *config.Project, vms []config.VM) ([]config.VM, er
 		}
 		waitingForLease = true
 		group.Go(func() error {
-			resolvedVMs[index].Network.IP, leaseErrors[index] = waitForLease(project.DomainName(vmConfig.Name))
+			resolvedVMs[index].Network.IP, leaseErrors[index] = waitForAddress(project.DomainName(vmConfig.Name), projectAddressSource(project))
 			return nil
 		})
 	}
@@ -82,14 +93,14 @@ func waitForAddresses(project *config.Project, vms []config.VM) ([]config.VM, er
 		return resolvedVMs, nil
 	}
 
-	ui.Println("\nWaiting for DHCP leases...")
+	ui.Println("\nWaiting for DHCP addresses...")
 	if err := group.Wait(); err != nil {
 		return nil, fmt.Errorf("waiting for DHCP leases: %w", err)
 	}
 	var addressedVMs []config.VM
 	for index, vmConfig := range vms {
 		if leaseErrors[index] != nil {
-			ui.Printf("  %s... no lease\n", vmConfig.Name)
+			ui.Printf("  %s... no address\n", vmConfig.Name)
 			leaseErrors[index] = fmt.Errorf("%s: %w", vmConfig.Name, leaseErrors[index])
 			continue
 		}
@@ -101,15 +112,15 @@ func waitForAddresses(project *config.Project, vms []config.VM) ([]config.VM, er
 	return addressedVMs, errors.Join(leaseErrors...)
 }
 
-// waitForLease polls the domain's DHCP lease with exponential backoff for up
-// to leaseWaitTimeout. Lookup errors are retried (libvirt may be busy) and
-// the last one is reported if no lease appears.
-func waitForLease(domainName string) (string, error) {
+// waitForAddress polls the domain's address from source with exponential
+// backoff for up to leaseWaitTimeout. Lookup errors are retried (libvirt may
+// be busy) and the last one is reported if no address appears.
+func waitForAddress(domainName string, source vm.AddressSource) (string, error) {
 	deadline := time.Now().Add(leaseWaitTimeout)
 	pollInterval := leaseInitialPollInterval
 	var lastLookupErr error
 	for {
-		leasedAddress, err := vm.LeaseAddress(domainName)
+		leasedAddress, err := vm.DiscoveredAddress(domainName, source)
 		if err == nil && leasedAddress != "" {
 			return leasedAddress, nil
 		}
@@ -121,7 +132,7 @@ func waitForLease(domainName string) (string, error) {
 		pollInterval = min(pollInterval*2, leaseMaxPollInterval)
 	}
 	if lastLookupErr != nil {
-		return "", fmt.Errorf("no DHCP lease within %s: %w", leaseWaitTimeout, lastLookupErr)
+		return "", fmt.Errorf("no DHCP address within %s: %w", leaseWaitTimeout, lastLookupErr)
 	}
-	return "", fmt.Errorf("no DHCP lease within %s — check the VM's console ('virsh console %s') for network errors", leaseWaitTimeout, domainName)
+	return "", fmt.Errorf("no DHCP address within %s — check the VM's console ('virsh console %s') for network errors", leaseWaitTimeout, domainName)
 }

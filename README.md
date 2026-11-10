@@ -147,8 +147,8 @@ vmherd checks the whole Herdfile before doing anything: unknown keys (typos such
 | `cpus` | 1 | Number of vCPUs (at least 1) |
 | `memory` | 1024 | Memory in MB (at least 256) |
 | `disk` | 20G | Disk size |
-| `network.ip` | — (DHCP) | Static IPv4 address in the subnet, outside the DHCP range .100–.200. Omit it to use DHCP: vmherd then reads the VM's address from libvirt's lease table for `ssh`, `scp`, `provision`, port forwards and `status` |
-| `network.gateway` | subnet .1 | Gateway IPv4 address inside the subnet (static `ip` only; with DHCP the gateway comes from DHCP) |
+| `network.ip` | — (DHCP) | Static IPv4 address in the subnet, outside the DHCP range .100–.200 (that range only applies to NAT networks). Omit it to use DHCP: vmherd then reads the VM's address from libvirt's lease table (NAT) or the host's ARP table (bridge) for `ssh`, `scp`, `provision`, port forwards and `status` |
+| `network.gateway` | subnet .1 (nat) / `network.gateway` (bridge) | Gateway IPv4 address inside the subnet (static `ip` only; with DHCP the gateway comes from DHCP) |
 | `shared_folders` | `[{host: ".", guest: "/vagrant"}]` | Host directories shared via 9p virtio. Files keep the same owner and modes on host and guest: QEMU runs as you for VMs with shares, and the guest SSH user gets your UID. Omit it to get the project at `/vagrant`; set `shared_folders: []` for no shares; an explicit list replaces the default. `vmherd up` prints every share. `host` must resolve (symlinks included) inside the project directory or `$HOME`; set `allow_outside_home: true` on an entry to share another path. `/`, `$HOME` itself and system directories are always refused |
 | `ports` | — | Port forwards (`host`→`guest`), carried by one background `ssh -L` tunnel per VM (TCP only; no firewall rules). `host_ip` defaults to `127.0.0.1` (this machine only); set `0.0.0.0` or a host address to expose a port on the network. Host ports below 1024 run the tunnel via `sudo`. `up`, `restart` and `reload` start the tunnel once SSH is ready; `down` and `destroy` stop it |
 | `provision` | — | List of provisioning steps: `type: shell` with an `inline` script, or `type: file` with a project-relative `source` and an absolute `destination` in the VM |
@@ -157,9 +157,25 @@ vmherd checks the whole Herdfile before doing anything: unknown keys (typos such
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `name` | vmherd-{dir} | libvirt network name. `vmherd init` writes `vmherd-{dir}-{hash}` so projects never share a network. `vmherd destroy` keeps the network while VMs of another project are still attached |
-| `subnet` | 192.168.122.0/24 | Network subnet. The default is the same as libvirt's stock `default` network, so set it explicitly; `vmherd init` writes the first free /24 in 192.168.150.0–192.168.249.0, skipping libvirt networks and host interfaces and routes |
+| `type` | nat | `nat` (vmherd creates and manages a libvirt NAT network) or `bridge` (VMs attach to an existing host bridge and appear on the LAN; vmherd creates no network and runs no DHCP) |
+| `name` | vmherd-{dir} | libvirt network name (nat only). `vmherd init` writes `vmherd-{dir}-{hash}` so projects never share a network. `vmherd destroy` keeps the network while VMs of another project are still attached |
+| `subnet` | 192.168.122.0/24 | Network subnet. The default is the same as libvirt's stock `default` network, so set it explicitly; `vmherd init` writes the first free /24 in 192.168.150.0–192.168.249.0, skipping libvirt networks and host interfaces and routes. In bridge mode it defaults to the gateway's /24 |
 | `dns` | auto | DNS server: `auto` (read from the host's /etc/resolv.conf) or an IP address |
+| `bridge` | — | Bridge mode only (required): the host bridge device to attach VMs to, e.g. `br1`. The bridge must already exist; vmherd never creates or removes host bridges |
+| `gateway` | — | Bridge mode only (required): the LAN router's IP the VMs route through, e.g. `192.168.100.1` |
+
+### Bridge mode
+
+With `type: bridge` the VMs join your LAN through an existing host bridge — the equivalent of Vagrant's `public_network`, but attached to a named bridge instead of a guessed interface:
+
+```yaml
+network:
+  type: bridge
+  bridge: br1
+  gateway: 192.168.100.1
+```
+
+Each VM either gets a static LAN address via cloud-init (`network.ip`, any address in the subnet your LAN's DHCP doesn't hand out) or, with `ip` omitted, asks the LAN's DHCP server. For DHCP VMs, vmherd discovers the address from the host's ARP table (`virsh domifaddr --source arp`), which works because the host sits on the same bridge.
 
 ### SSH fields
 

@@ -8,7 +8,6 @@ import (
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
 	"github.com/boyadzhievb/vmherd/internal/config"
 	"github.com/boyadzhievb/vmherd/internal/image"
-	"github.com/boyadzhievb/vmherd/internal/network"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -41,11 +40,6 @@ Examples:
 				return err
 			}
 
-			subnetBase, err := project.SubnetBase()
-			if err != nil {
-				return err
-			}
-
 			gatewayIP, err := project.GatewayIP()
 			if err != nil {
 				return err
@@ -63,14 +57,14 @@ Examples:
 				return err
 			}
 
-			if err := network.Ensure(project.StateDir, project.Herdfile.Network.Name, subnetBase); err != nil {
+			if err := ensureProjectNetwork(project); err != nil {
 				return err
 			}
 
 			var recreatedVMs []config.VM
 			var reloadFailures []error
 			for _, vmConfig := range vmsToReload {
-				if err := reloadSingleVM(project, vmConfig, pubKey, subnetBase, dnsServer); err != nil {
+				if err := reloadSingleVM(project, vmConfig, pubKey, gatewayIP, dnsServer); err != nil {
 					reloadFailures = append(reloadFailures, fmt.Errorf("%s: %w", vmConfig.Name, err))
 					continue
 				}
@@ -94,7 +88,7 @@ Examples:
 
 // reloadSingleVM stops and destroys a VM (disk and seed included) and creates
 // it again from the current Herdfile under the project-unique domain name.
-func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, subnetBase, dnsServer string) error {
+func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, defaultGateway, dnsServer string) error {
 	if err := stopPortForwarding(project, vmConfig); err != nil {
 		return err
 	}
@@ -110,7 +104,7 @@ func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, subnetB
 
 	// The old domain is gone, so recreate under the project-unique name.
 	project.DropLegacyDomainName(vmConfig.Name)
-	return createVM(project, vmConfig, project.DomainName(vmConfig.Name), pubKey, subnetBase, dnsServer)
+	return createVM(project, vmConfig, project.DomainName(vmConfig.Name), pubKey, defaultGateway, dnsServer)
 }
 
 // shutdownAndDestroy gracefully stops a VM (forcing only after the shutdown
@@ -143,7 +137,7 @@ func shutdownAndDestroy(domainName, vmName string) error {
 
 // createVM resolves the image, generates cloud-init files, builds the seed ISO,
 // and creates a new VM.
-func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, subnetBase, dnsServer string) error {
+func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, defaultGateway, dnsServer string) error {
 	entry, err := image.Resolve(vmConfig.Image, project.Herdfile.Images)
 	if err != nil {
 		return err
@@ -172,7 +166,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 	ciFiles, err := cloudinit.GenerateFiles(
 		project.StateDir, vmConfig,
 		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
-		subnetBase, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
+		defaultGateway, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
 	)
 	if err != nil {
 		return err
@@ -194,6 +188,7 @@ func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, s
 		DiskPath:         project.DiskPath(vmConfig.Name),
 		SeedPath:         seedPath,
 		NetworkName:      project.Herdfile.Network.Name,
+		BridgeName:       project.Herdfile.Network.Bridge,
 		MACAddress:       macAddress,
 		Memory:           vmConfig.Memory,
 		CPUs:             vmConfig.CPUs,

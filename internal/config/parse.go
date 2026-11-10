@@ -110,11 +110,18 @@ func applyDefaults(herdfile *Herdfile, dir string) {
 	if herdfile.SSH.User == "" {
 		herdfile.SSH.User = "vmherd"
 	}
+	if herdfile.Network.Type == "" {
+		herdfile.Network.Type = NetworkTypeNAT
+	}
 	if herdfile.Network.Name == "" {
 		herdfile.Network.Name = "vmherd-" + filepath.Base(dir)
 	}
 	if herdfile.Network.Subnet == "" {
-		herdfile.Network.Subnet = "192.168.122.0/24"
+		if herdfile.Network.IsBridge() {
+			herdfile.Network.Subnet = gatewaySlash24(herdfile.Network.Gateway)
+		} else {
+			herdfile.Network.Subnet = "192.168.122.0/24"
+		}
 	}
 	if herdfile.Network.DNS == "" {
 		herdfile.Network.DNS = "auto"
@@ -156,10 +163,17 @@ func validate(herdfile *Herdfile, projectDir string) error {
 	}
 
 	// A bad subnet is reported once here; the VMs' in-subnet checks then skip.
-	subnetCIDR, err := parseSubnet(herdfile.Network.Subnet)
-	if err != nil {
-		problems = append(problems, err)
+	// In bridge mode an empty subnet means the gateway was unusable to derive
+	// one, which the bridge checks below already report.
+	var subnetCIDR *net.IPNet
+	if herdfile.Network.Subnet != "" {
+		var err error
+		subnetCIDR, err = parseSubnet(herdfile.Network.Subnet)
+		if err != nil {
+			problems = append(problems, err)
+		}
 	}
+	problems = append(problems, validateNetworkMode(herdfile.Network, subnetCIDR)...)
 
 	usedNames := make(map[string]bool)
 	usedHostPorts := make(map[string]string)
@@ -170,7 +184,7 @@ func validate(herdfile *Herdfile, projectDir string) error {
 		if err := validateDiskSize(vmConfig.Disk, vmConfig.Name); err != nil {
 			problems = append(problems, err)
 		}
-		problems = append(problems, validateVMIPAddress(vmConfig, subnetCIDR, usedIPs)...)
+		problems = append(problems, validateVMIPAddress(vmConfig, subnetCIDR, usedIPs, herdfile.Network.IsBridge())...)
 		if err := validateVMGateway(vmConfig, subnetCIDR); err != nil {
 			problems = append(problems, err)
 		}
@@ -272,8 +286,9 @@ func validateDiskSize(diskSize string, vmName string) error {
 
 // validateVMIPAddress validates a VM's IP: correct format, no duplicates,
 // within subnetCIDR (skipped when the subnet itself is invalid and nil). No
-// ip means DHCP, which must not have a gateway override.
-func validateVMIPAddress(vmConfig VM, subnetCIDR *net.IPNet, usedIPs map[string]string) []error {
+// ip means DHCP, which must not have a gateway override. The DHCP pool
+// check only applies to NAT networks, where vmherd runs the DHCP server.
+func validateVMIPAddress(vmConfig VM, subnetCIDR *net.IPNet, usedIPs map[string]string, networkIsBridge bool) []error {
 	if vmConfig.Network.IP == "" {
 		if vmConfig.Network.Gateway != "" {
 			return []error{fmt.Errorf("VM %q: network.gateway is set but network.ip is not — without an ip the VM uses DHCP, which provides the gateway; add an ip or remove the gateway",
@@ -297,7 +312,7 @@ func validateVMIPAddress(vmConfig VM, subnetCIDR *net.IPNet, usedIPs map[string]
 		problems = append(problems, fmt.Errorf("VM %q: IP address %s is outside the network subnet %s", vmConfig.Name, vmConfig.Network.IP, subnetCIDR))
 	}
 	lastOctet := int(parsedIP.To4()[3])
-	if lastOctet >= dhcpPoolStart && lastOctet <= dhcpPoolEnd {
+	if !networkIsBridge && lastOctet >= dhcpPoolStart && lastOctet <= dhcpPoolEnd {
 		problems = append(problems, fmt.Errorf("VM %q: IP address %s is in the DHCP pool range (.%d-.%d) — use an address outside this range to avoid collisions with DHCP leases",
 			vmConfig.Name, vmConfig.Network.IP, dhcpPoolStart, dhcpPoolEnd))
 	}

@@ -223,8 +223,12 @@ func (p *Project) SubnetBase() (string, error) {
 	return fmt.Sprintf("%d.%d.%d", ip[0], ip[1], ip[2]), nil
 }
 
-// GatewayIP returns the gateway IP for the network (subnet base + .1).
+// GatewayIP returns the gateway IP VMs route through: the Herdfile's LAN
+// gateway in bridge mode, or the NAT subnet's .1.
 func (p *Project) GatewayIP() (string, error) {
+	if p.Herdfile.Network.IsBridge() {
+		return p.Herdfile.Network.Gateway, nil
+	}
 	base, err := p.SubnetBase()
 	if err != nil {
 		return "", err

@@ -48,8 +48,12 @@ func newDestroyCmd() *cobra.Command {
 			}
 
 			if destroyAll {
-				if err := destroyNetworkUnlessShared(project.Herdfile.Network.Name); err != nil {
-					destroyFailures = append(destroyFailures, err)
+				// A host bridge is not vmherd's to remove; only the managed
+				// NAT network is cleaned up.
+				if !project.Herdfile.Network.IsBridge() {
+					if err := destroyNetworkUnlessShared(project.Herdfile.Network.Name); err != nil {
+						destroyFailures = append(destroyFailures, err)
+					}
 				}
 				if err := config.RemoveProjectStateDir(project.StateDir, project.Herdfile.VMNames()); err != nil {
 					destroyFailures = append(destroyFailures, err)

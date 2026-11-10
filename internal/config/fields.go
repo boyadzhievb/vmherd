@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -59,6 +60,79 @@ func validateVMGateway(vmConfig VM, subnetCIDR *net.IPNet) error {
 		return fmt.Errorf("VM %q: network.gateway %s is the subnet's network or broadcast address — use a host address such as the subnet's .1", vmConfig.Name, gateway)
 	}
 	return nil
+}
+
+// maxBridgeDeviceNameLength is the Linux limit for network interface names (IFNAMSIZ - 1).
+const maxBridgeDeviceNameLength = 15
+
+// bridgeDeviceNamePattern matches Linux network interface names: letters,
+// digits, dot, underscore and hyphen (no spaces or slashes).
+var bridgeDeviceNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// gatewaySlash24 returns the /24 CIDR containing gatewayIP (e.g.
+// "192.168.100.1" → "192.168.100.0/24"), or "" when gatewayIP is not IPv4.
+// Bridge-mode Herdfiles without a subnet get their subnet from it.
+func gatewaySlash24(gatewayIP string) string {
+	parsedGateway := net.ParseIP(gatewayIP)
+	if parsedGateway == nil || parsedGateway.To4() == nil {
+		return ""
+	}
+	gatewayBytes := parsedGateway.To4()
+	return fmt.Sprintf("%d.%d.%d.0/24", gatewayBytes[0], gatewayBytes[1], gatewayBytes[2])
+}
+
+// validateNetworkMode checks the network type and its mode-specific fields:
+// bridge mode needs a valid bridge device name and a gateway inside the
+// subnet; nat mode must not carry the bridge-only fields.
+func validateNetworkMode(networkConfig NetworkConfig, subnetCIDR *net.IPNet) []error {
+	switch networkConfig.Type {
+	case NetworkTypeNAT:
+		var problems []error
+		if networkConfig.Bridge != "" {
+			problems = append(problems, fmt.Errorf("network.bridge %q is set but network.type is not 'bridge' — add 'type: bridge' to attach VMs to the host bridge", networkConfig.Bridge))
+		}
+		if networkConfig.Gateway != "" {
+			problems = append(problems, fmt.Errorf("network.gateway is only used with 'type: bridge' — on a NAT network the gateway is always the subnet's .1"))
+		}
+		return problems
+	case NetworkTypeBridge:
+		return append(validateBridgeDevice(networkConfig.Bridge), validateBridgeGateway(networkConfig.Gateway, subnetCIDR)...)
+	default:
+		return []error{fmt.Errorf("network.type %q is invalid — use 'nat' (vmherd-managed libvirt network, the default) or 'bridge' (existing host bridge)", networkConfig.Type)}
+	}
+}
+
+// validateBridgeDevice checks the bridge mode's host bridge device name.
+func validateBridgeDevice(bridgeDevice string) []error {
+	switch {
+	case bridgeDevice == "":
+		return []error{fmt.Errorf("network.bridge is required with 'type: bridge' — the host bridge device to attach VMs to, e.g. br1")}
+	case len(bridgeDevice) > maxBridgeDeviceNameLength:
+		return []error{fmt.Errorf("network.bridge %q is longer than %d characters, the Linux interface name limit", bridgeDevice, maxBridgeDeviceNameLength)}
+	case !bridgeDeviceNamePattern.MatchString(bridgeDevice):
+		return []error{fmt.Errorf("network.bridge %q is not a valid interface name — use letters, digits, '.', '_' or '-'", bridgeDevice)}
+	}
+	return nil
+}
+
+// validateBridgeGateway checks the bridge mode's LAN gateway: a usable IPv4
+// host address inside the subnet (when the subnet is valid).
+func validateBridgeGateway(gateway string, subnetCIDR *net.IPNet) []error {
+	if gateway == "" {
+		return []error{fmt.Errorf("network.gateway is required with 'type: bridge' — the LAN router's IP the VMs route through, e.g. 192.168.100.1")}
+	}
+	gatewayIP := net.ParseIP(gateway)
+	if gatewayIP == nil || gatewayIP.To4() == nil {
+		return []error{fmt.Errorf("network.gateway %q is not an IPv4 address", gateway)}
+	}
+	var problems []error
+	if subnetCIDR != nil && !subnetCIDR.Contains(gatewayIP) {
+		problems = append(problems, fmt.Errorf("network.gateway %s is outside the network subnet %s", gateway, subnetCIDR))
+	}
+	if lastOctet := gatewayIP.To4()[3]; lastOctet == 0 || lastOctet == 255 {
+		problems = append(problems, fmt.Errorf("network.gateway %s is a network or broadcast address — use the router's host address, e.g. its .1", gateway))
+	}
+	return problems
 }
 
 // validateDNS checks network.dns: "auto" (taken from the host) or an IP address.

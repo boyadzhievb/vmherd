@@ -79,6 +79,10 @@ ssh:
   user: vmherd                  # default SSH user created on all VMs
 ```
 
+### Bridge mode (M5, 2026-11-10)
+
+`network: {type: bridge, bridge: br1, gateway: 192.168.100.1}` attaches VMs to an existing host bridge instead of a vmherd-managed NAT network — no libvirt network, no vmherd DHCP. `subnet` defaults to the gateway's /24. VMs get a static LAN IP via cloud-init (`network.ip`) or use the LAN's DHCP (`ip` omitted); DHCP addresses are discovered via `virsh domifaddr --source arp` (host ARP table) instead of `--source lease`. The `.100–.200` reserved range only applies to NAT. `up`/`reload` verify the bridge exists (`/sys/class/net/<br>/bridge`); `destroy` never touches it. Vagrant equivalent: `public_network`.
+
 ---
 
 ### Shared Folders (default project share)

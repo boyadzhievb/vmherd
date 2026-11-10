@@ -21,6 +21,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
+| M5 | Bridge networking (feature, v0.4.0) | 1 | 1 |
 
 ---
 
@@ -495,3 +496,19 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** Stale LLM review output ("ALL FIXED (pending commit)") lives next to the code and can mislead agents.
   - **Fix:** Move it to `docs/reviews/archive/`, or delete it once this file supersedes it. Keep `checklist.md` only if it's updated to match CLAUDE.md.
   - **Done when:** `reviews/` contains no stale status claims.
+
+---
+
+## M5 — Bridge networking (feature, v0.4.0)
+
+- [x] **M5.1 — Herdfile bridge mode: attach VMs to an existing host bridge** · Feature
+  - **Files:** `internal/config/config.go`, `internal/config/parse.go`, `internal/config/fields.go`, `internal/config/project.go`, `internal/cloudinit/cloudinit.go`, `internal/vm/vm.go`, `internal/vm/domain.go`, `internal/network/network.go`, `cmd/vmherd/{up,reload,destroy,status,vm_address,network_setup}.go`
+  - **What:** `network: {type: bridge, bridge: br1, gateway: 192.168.100.1}` attaches VMs to the host bridge `br1` with static LAN IPs set by cloud-init, or LAN DHCP when a VM's `ip` is omitted. No libvirt network is created, no vmherd DHCP runs. The Vagrant equivalent is `public_network` with a fixed bridge.
+  - **Design:**
+    - `network.type` is a typed enum (`nat` default, `bridge`). Bridge mode requires `bridge` (valid interface name, ≤15 chars) and `gateway` (IPv4 inside the subnet); `subnet` defaults to the gateway's /24. NAT Herdfiles that set `bridge`/`gateway` are rejected with a hint.
+    - Domain XML gets `<interface type='bridge'><source bridge='…'/>`; `vm.CreateOptions.BridgeName` selects it over `NetworkName`.
+    - `up`/`reload` check `/sys/class/net/<bridge>/bridge` exists instead of `network.Ensure`; `destroy` never removes a host bridge.
+    - DHCP address discovery uses `virsh domifaddr --source arp` (host ARP table) in bridge mode, `--source lease` on NAT (`vm.DiscoveredAddress` with a typed `AddressSource`).
+    - The `.100–.200` reserved-range check only applies to NAT, where vmherd's own dnsmasq owns that pool.
+    - `cloudinit.GenerateFiles` now takes the default gateway instead of a subnet base (the NAT `.1` rule moved to `Project.GatewayIP`).
+  - **Done when:** `go test ./...` passes with bridge validation, domain-XML golden and DHCP-pool tests; smoke-tested on a testbed with a real bridge. Released as v0.4.0.

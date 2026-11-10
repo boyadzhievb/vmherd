@@ -372,6 +372,22 @@ func Ensure(stateDir, networkName, subnetBase string) error {
 	return nil
 }
 
+// sysClassNetPath is where the Linux kernel exposes network interfaces.
+const sysClassNetPath = "/sys/class/net"
+
+// EnsureBridgeExists verifies that bridgeName is an existing bridge device on
+// this host. vmherd never creates or removes host bridges; it only attaches
+// VMs to one that is already configured.
+func EnsureBridgeExists(bridgeName string) error {
+	if _, err := os.Stat(filepath.Join(sysClassNetPath, bridgeName)); err != nil {
+		return fmt.Errorf("host bridge %q does not exist — create it first (e.g. with nmcli or systemd-networkd) or fix 'network.bridge' in your Herdfile", bridgeName)
+	}
+	if _, err := os.Stat(filepath.Join(sysClassNetPath, bridgeName, "bridge")); err != nil {
+		return fmt.Errorf("host interface %q exists but is not a bridge — point 'network.bridge' at a bridge device such as br0", bridgeName)
+	}
+	return nil
+}
+
 // Destroy removes a libvirt network.
 func Destroy(networkName string) error {
 	if !exists(networkName) {

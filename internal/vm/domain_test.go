@@ -67,6 +67,21 @@ func goldenTestCases() []struct {
 			},
 		},
 		{
+			name: "bridge",
+			opts: CreateOptions{
+				VMName:     "lan",
+				DomainName: "vmherd-edge-87654321-lan",
+				DiskPath:   "/var/lib/libvirt/images/vmherd-edge-87654321-lan.qcow2",
+				BridgeName: "br1",
+				MACAddress: "52:54:00:12:34:56",
+				Memory:     2048,
+				CPUs:       2,
+				ImagePath:  "/home/user/.vmherd/images/ubuntu-noble-amd64.qcow2",
+				DiskSize:   "20G",
+				SeedPath:   "/var/lib/libvirt/images/vmherd-edge-87654321-lan-seed.iso",
+			},
+		},
+		{
 			name: "multi-share",
 			opts: CreateOptions{
 				VMName:      "build",

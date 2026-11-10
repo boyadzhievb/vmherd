@@ -44,11 +44,32 @@ type VMNetworkConfig struct {
 	Gateway string `yaml:"gateway"` // gateway override (defaults to subnet .1)
 }
 
-// NetworkConfig defines the libvirt network for the project.
+// NetworkType selects how VMs reach the outside world.
+type NetworkType string
+
+const (
+	// NetworkTypeNAT puts VMs on a vmherd-managed libvirt NAT network (the default).
+	NetworkTypeNAT NetworkType = "nat"
+	// NetworkTypeBridge attaches VMs to an existing host bridge, so they appear
+	// on the LAN with their own addresses. No libvirt network is created.
+	NetworkTypeBridge NetworkType = "bridge"
+)
+
+// NetworkConfig defines the project network: a vmherd-managed libvirt NAT
+// network (type nat) or an existing host bridge (type bridge).
 type NetworkConfig struct {
-	Name   string `yaml:"name"`   // libvirt network name
-	Subnet string `yaml:"subnet"` // CIDR notation (e.g. 192.168.122.0/24)
-	DNS    string `yaml:"dns"`    // "auto" or explicit DNS server IP
+	Type    NetworkType `yaml:"type"`    // nat (default) or bridge
+	Name    string      `yaml:"name"`    // libvirt network name (nat mode)
+	Subnet  string      `yaml:"subnet"`  // CIDR notation (e.g. 192.168.122.0/24); in bridge mode defaults to the gateway's /24
+	DNS     string      `yaml:"dns"`     // "auto" or explicit DNS server IP
+	Bridge  string      `yaml:"bridge"`  // host bridge device VMs attach to (bridge mode, e.g. br1)
+	Gateway string      `yaml:"gateway"` // LAN router IP the VMs route through (bridge mode)
+}
+
+// IsBridge reports whether the project attaches VMs to a host bridge instead
+// of a vmherd-managed libvirt network.
+func (networkConfig NetworkConfig) IsBridge() bool {
+	return networkConfig.Type == NetworkTypeBridge
 }
 
 // SSHConfig holds SSH-related defaults.

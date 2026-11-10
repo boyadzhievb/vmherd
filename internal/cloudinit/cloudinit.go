@@ -28,8 +28,10 @@ type SharedMount struct {
 }
 
 // GenerateFiles creates the cloud-init configuration files for a VM.
-// sshUserUID sets the SSH user's UID (0 keeps the guest's default allocation).
-func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, subnetBase, dnsServer, macAddress string, sharedMounts []SharedMount, sshUserUID int) (*Files, error) {
+// defaultGateway is used when the VM has no gateway override (the NAT
+// subnet's .1, or the LAN gateway in bridge mode). sshUserUID sets the SSH
+// user's UID (0 keeps the guest's default allocation).
+func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKey, defaultGateway, dnsServer, macAddress string, sharedMounts []SharedMount, sshUserUID int) (*Files, error) {
 	seedDir := filepath.Join(stateDir, vm.Name)
 	if err := os.MkdirAll(seedDir, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot create cloud-init directory for %s: %w", vm.Name, err)
@@ -37,7 +39,7 @@ func GenerateFiles(stateDir string, vm config.VM, sshUser, sshPassword, sshPubKe
 
 	gateway := vm.Network.Gateway
 	if gateway == "" {
-		gateway = subnetBase + ".1"
+		gateway = defaultGateway
 	}
 
 	if err := writeUserData(seedDir, vm, sshUser, sshPassword, sshPubKey, sharedMounts, sshUserUID); err != nil {

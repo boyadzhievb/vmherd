@@ -4,6 +4,22 @@ All notable releases are documented here.
 
 ---
 
+## v0.4.0
+
+**2026-11-10** — Bridge networking: put VMs on the LAN through an existing host bridge
+
+### Added
+- `network.type: bridge` with `bridge:` (host bridge device) and `gateway:` (LAN router IP). VMs attach to the bridge with `<interface type='bridge'>` and appear on the LAN — the Vagrant `public_network` equivalent. vmherd creates no libvirt network and runs no DHCP in this mode; `subnet` defaults to the gateway's /24.
+- Bridge-mode VMs get a static LAN IP via cloud-init (`network.ip`) or use the LAN's DHCP server when `ip` is omitted. DHCP addresses are discovered from the host's ARP table (`virsh domifaddr --source arp`), since libvirt's lease table only covers its own networks.
+- `vmherd up`/`reload` verify the bridge device exists (`/sys/class/net/<bridge>/bridge`) with an actionable error; `vmherd destroy` never touches a host bridge.
+- Validation: bridge mode requires `bridge` and `gateway`; `bridge`/`gateway` on a NAT network are rejected with a hint; the reserved `.100–.200` range check now only applies to NAT networks, where vmherd's own DHCP pool lives.
+
+### Changed
+- `cloudinit.GenerateFiles` takes the default gateway instead of a subnet base; the NAT ".1" convention lives in `Project.GatewayIP`.
+- `vm.LeaseAddress` became `vm.DiscoveredAddress(domain, source)` with a typed address source (`lease`/`arp`).
+
+---
+
 ## v0.3.0
 
 **2026-11-09** — Drop virt-install dependency, build VMs from domain XML and pure-Go cloud-init ISOs

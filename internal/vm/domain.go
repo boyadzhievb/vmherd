@@ -125,9 +125,11 @@ type domainInterface struct {
 	Model  domainInterfaceModel  `xml:"model"`
 }
 
-// domainInterfaceSource identifies which libvirt network to connect to.
+// domainInterfaceSource identifies what the interface connects to: a libvirt
+// network (NAT mode) or a host bridge device (bridge mode).
 type domainInterfaceSource struct {
-	Network string `xml:"network,attr"`
+	Network string `xml:"network,attr,omitempty"`
+	Bridge  string `xml:"bridge,attr,omitempty"`
 }
 
 // domainInterfaceMAC sets the MAC address for the interface.
@@ -289,14 +291,7 @@ func RenderDomainXML(opts CreateOptions) ([]byte, error) {
 		},
 	}
 
-	domain.Devices.Interfaces = []domainInterface{
-		{
-			Type:   "network",
-			Source: domainInterfaceSource{Network: opts.NetworkName},
-			MAC:    &domainInterfaceMAC{Address: opts.MACAddress},
-			Model:  domainInterfaceModel{Type: "virtio"},
-		},
-	}
+	domain.Devices.Interfaces = []domainInterface{buildPrimaryInterface(opts)}
 
 	if opts.ConsoleLogPath != "" {
 		domain.Devices.Serials = []domainSerial{
@@ -373,4 +368,21 @@ func RenderDomainXML(opts CreateOptions) ([]byte, error) {
 		return nil, fmt.Errorf("marshaling domain XML for %s: %w", opts.DomainName, err)
 	}
 	return append([]byte(xml.Header), output...), nil
+}
+
+// buildPrimaryInterface returns the VM's network interface: attached to the
+// host bridge when BridgeName is set, to the libvirt network otherwise.
+func buildPrimaryInterface(opts CreateOptions) domainInterface {
+	interfaceSource := domainInterfaceSource{Network: opts.NetworkName}
+	interfaceType := "network"
+	if opts.BridgeName != "" {
+		interfaceSource = domainInterfaceSource{Bridge: opts.BridgeName}
+		interfaceType = "bridge"
+	}
+	return domainInterface{
+		Type:   interfaceType,
+		Source: interfaceSource,
+		MAC:    &domainInterfaceMAC{Address: opts.MACAddress},
+		Model:  domainInterfaceModel{Type: "virtio"},
+	}
 }

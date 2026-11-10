@@ -45,7 +45,8 @@ type CreateOptions struct {
 	DomainName       string              // libvirt domain name (project-scoped)
 	DiskPath         string              // path to the VM's qcow2 disk image
 	SeedPath         string              // path to the cloud-init seed ISO
-	NetworkName      string              // libvirt network to attach the VM to
+	NetworkName      string              // libvirt network to attach the VM to (NAT mode)
+	BridgeName       string              // host bridge to attach the VM to instead (bridge mode)
 	MACAddress       string              // assigned MAC address
 	Memory           int                 // RAM in megabytes
 	CPUs             int                 // virtual CPU count
@@ -182,12 +183,24 @@ func parseDomainInterfaceMACs(domiflistOutput string) []string {
 	return macAddresses
 }
 
-// LeaseAddress returns the IPv4 address libvirt's DHCP server leased to the
-// domain, or "" when it has no lease yet (still booting, or not running).
-func LeaseAddress(domainName string) (string, error) {
-	output, err := exec.Command("sudo", "virsh", "domifaddr", domainName, "--source", "lease").Output()
+// AddressSource selects where libvirt looks up a running domain's IPv4 address.
+type AddressSource string
+
+const (
+	// AddressSourceLease reads libvirt's own DHCP leases (NAT networks).
+	AddressSourceLease AddressSource = "lease"
+	// AddressSourceARP reads the host's ARP/neighbour table, the only place a
+	// bridged VM's LAN-assigned address shows up on the host.
+	AddressSourceARP AddressSource = "arp"
+)
+
+// DiscoveredAddress returns the domain's IPv4 address as 'virsh domifaddr'
+// reports it from source, or "" when none is known yet (still booting, or
+// not running).
+func DiscoveredAddress(domainName string, source AddressSource) (string, error) {
+	output, err := exec.Command("sudo", "virsh", "domifaddr", domainName, "--source", string(source)).Output()
 	if err != nil {
-		return "", fmt.Errorf("reading DHCP lease of %s: %w — check that libvirtd is running and the VM exists", domainName, err)
+		return "", fmt.Errorf("reading the address of %s (source %s): %w — check that libvirtd is running and the VM exists", domainName, source, err)
 	}
 	return parseLeaseIPv4(string(output)), nil
 }
