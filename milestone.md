@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 17 | 14 |
+| M1 | Correctness of existing features | 17 | 15 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -263,11 +263,12 @@ This is a remediation plan, separate from the product roadmap milestones.
   - **Fix:** Depends on the repro.
   - **Done when:** `vmherd up` with `rocky:9` and with `almalinux:9` reaches SSH on the testbed.
 
-- [ ] **M1.15 — `vmherd console-log` fails with "permission denied"** · Med
+- [x] **M1.15 — `vmherd console-log` fails with "permission denied"** · Med
   - **Files:** `cmd/vmherd/console_log.go`, `internal/vm/vm.go` (`--serial file,path=…`)
   - **Problem:** virtlogd writes `<state>/<vm>/console.log` as `root:root 0600`, so the host user can't read it. Same with the pre-M0.8 binary (verified on .49, 2026-11-05).
   - **Fix:** Options: read the log via `sudo cat` (consistent with the other `sudo virsh` calls), or have libvirt write a log the user can read. Pick the one that doesn't loosen permissions on other files.
   - **Done when:** `vmherd console-log <vm>` prints the log on the testbed for a VM with `console_log: true`.
+  - **Result (2026-11-10):** Reproduced with the M1.17 domain XML (`<serial type='file'>`): both logs were `root:root 0600`, for a VM with shares (QEMU runs as the host user) as well as one without (libvirt's QEMU user) — virtlogd (root) creates the file, so QEMU's user doesn't matter. Chose the option that changes no permissions: `printConsoleLog` reads the file directly when it can and, on a permission error only, runs `sudo cat -- <path>` attached to the terminal (sudo can prompt), consistent with the other `sudo virsh` calls. The log stays root-only (it can hold boot output). A missing log now names the path and says to set `console_log: true` and `vmherd reload <vm>`; a failed sudo read suggests `sudo cat <path>`. Tests (`cmd/vmherd/console_log_test.go`, injected reader): readable file copied without sudo; 0000 file read through the privileged reader, failure hint; missing log hint with no privileged read. Verified on .71 (two noble VMs, `shared` and `noshare`, both `console_log: true`): `console-log` prints the full boot log for both (1071/1047 lines, through cloud-init "finished" and the login prompt), exit 0; an unknown VM exits 1 with the hint; `destroy` removes the state dir including the root-owned logs. Rotated logs (virtlogd `console.log.N`) are not printed.
 
 - [ ] **M1.16 — 🧭 A shell step reports success when an earlier command failed** · Med
   - **Files:** `internal/ssh/connect.go` (`rootScriptCommandLine`), `internal/cloudinit/cloudinit.go` (`writeRuncmdEntries`), README (provisioning section)
