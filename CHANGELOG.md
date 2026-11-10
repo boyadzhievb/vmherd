@@ -4,6 +4,23 @@ All notable releases are documented here.
 
 ---
 
+## v0.4.1
+
+**2026-11-10** — Rocky/AlmaLinux VMs work, shell steps fail fast, readable console logs
+
+### Changed
+- **Shell provisioning steps now stop at the first failing command.** Every shell step runs with `bash -e -o pipefail`, on first boot and with `vmherd provision`, so a step whose `apt-get update` fails no longer reports "done" because a later command succeeded. This differs from Vagrant, where scripts need `set -e`. Add `|| true` to a command whose failure is fine, or set `errexit: false` on the step for plain bash (only the last command's exit status counts).
+
+### Fixed
+- Rocky Linux 9 and AlmaLinux 9 VMs reach SSH. The static network-config used netplan's `to: default` route shorthand, which cloud-init rejects on distros without netplan, so the whole network config was dropped and the VM came up on a random DHCP address. The default route is now written as `0.0.0.0/0`. DHCP VMs on EL keep the host-derived DNS server, as on Ubuntu.
+- `vmherd console-log` works. libvirt's log daemon writes the log as root-only; vmherd now reads it with `sudo` when the file isn't readable, without changing its permissions. A missing log says to set `console_log: true` and reload.
+- `vmherd pull` verifies Arch Linux images. Arch publishes one `<image>.SHA256` file per image, which checksum discovery skipped; it also no longer ends an error in `: <nil>`. Checksum lists for algorithms vmherd can't verify (BLAKE2, MD5, SHA-1, SHA-224, SHA-384) are skipped instead of failing as a misleading "image corrupted" mismatch.
+
+### Known limitations
+- Rocky and AlmaLinux kernels have no 9p, so the default `/vagrant` share can't be mounted there. `vmherd up` now says so and suggests `shared_folders: []` for those VMs. Opt-in `rsync` and `nfs` share types are planned.
+
+---
+
 ## v0.4.0
 
 **2026-11-10** — Bridge networking: put VMs on the LAN through an existing host bridge
