@@ -188,13 +188,15 @@ func quoteForShell(value string) string {
 // writeNetworkConfig generates the cloud-init network-config file. With an
 // ipAddress the interface gets that static address; without one it uses
 // DHCP keyed by MAC (the lease 'virsh domifaddr' looks up). Either way DNS is
-// dnsServer (derived from the host), never the DHCP-provided server.
+// dnsServer (derived from the host), never the DHCP-provided server. The
+// default route is written as 0.0.0.0/0, not netplan's "default": cloud-init
+// parses the config itself on distros without netplan (EL) and rejects it.
 func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer, macAddress string) error {
 	addressing := fmt.Sprintf(`    dhcp4: false
     addresses:
       - %s/24
     routes:
-      - to: default
+      - to: 0.0.0.0/0
         via: %s
 `, ipAddress, gateway)
 	if ipAddress == "" {

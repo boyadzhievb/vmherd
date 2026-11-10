@@ -93,8 +93,13 @@ func TestGenerateFilesNetworkConfigContent(t *testing.T) {
 	expectedFragments := []string{
 		"version: 2",
 		"192.168.122.50/24",
+		"to: 0.0.0.0/0",
 		"via: 192.168.122.1",
 		"- 8.8.8.8",
+	}
+	// cloud-init's own v2 parser (EL, no netplan) rejects netplan's "default".
+	if strings.Contains(content, "to: default") {
+		t.Errorf("network-config uses netplan-only 'to: default':\n%s", content)
 	}
 
 	for _, fragment := range expectedFragments {
