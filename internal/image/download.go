@@ -64,7 +64,7 @@ func Download(entry *Entry) (string, error) {
 		return "", fmt.Errorf("cannot download %s: %w", entry.Description, err)
 	}
 
-	checksum, discoverError := discoverChecksumInfo(entry)
+	checksum, discoverError := discoverChecksumInfo(http.DefaultClient, entry)
 	if discoverError != nil {
 		return "", fmt.Errorf("cannot find checksum for %s: %w", entry.Description, discoverError)
 	}
@@ -119,23 +119,29 @@ func checkImageURLAvailable(httpClient *http.Client, imageURL string) error {
 
 // discoverChecksumInfo finds the checksum for an image entry. If the entry has
 // an explicit ChecksumURL, it is used directly. Otherwise the function scrapes
-// the image directory listing for files matching *SUM* or *CHECKSUM* patterns,
-// then fetches the best match and extracts the expected hash.
-func discoverChecksumInfo(entry *Entry) (*checksumInfo, error) {
+// the image directory listing for checksum files (see isChecksumFileName),
+// then fetches them in preference order until one lists the image.
+func discoverChecksumInfo(httpClient *http.Client, entry *Entry) (*checksumInfo, error) {
 	if entry.ChecksumURL != "" {
-		return fetchChecksumFromURL(entry.ChecksumURL, entry.Filename)
+		return fetchChecksumFromURL(httpClient, entry.ChecksumURL, entry.Filename)
 	}
 
 	baseURL := entry.ImageURL[:strings.LastIndex(entry.ImageURL, "/")+1]
 
-	checksumURLs, scrapeError := scrapeChecksumURLsFromDirectory(baseURL)
-	if scrapeError != nil || len(checksumURLs) == 0 {
-		return nil, fmt.Errorf("no checksum file found in directory listing at %s: %v", baseURL, scrapeError)
+	checksumURLs, scrapeError := scrapeChecksumURLsFromDirectory(httpClient, baseURL, entry.Filename)
+	if scrapeError != nil {
+		return nil, fmt.Errorf("reading the image directory listing at %s: %w", baseURL, scrapeError)
+	}
+	if len(checksumURLs) == 0 {
+		return nil, fmt.Errorf("the directory listing at %s links no checksum file (looked for names containing "+
+			"SUM, SHA256 or SHA512, e.g. SHA256SUMS or %s.SHA256), so the download can't be verified — "+
+			"open that page and check that the images: entry in your Herdfile points at the vendor's image directory",
+			baseURL, entry.Filename)
 	}
 
 	var lastError error
 	for _, candidateURL := range checksumURLs {
-		result, fetchError := fetchChecksumFromURL(candidateURL, entry.Filename)
+		result, fetchError := fetchChecksumFromURL(httpClient, candidateURL, entry.Filename)
 		if fetchError != nil {
 			lastError = fetchError
 			continue
@@ -147,14 +153,14 @@ func discoverChecksumInfo(entry *Entry) (*checksumInfo, error) {
 }
 
 // scrapeChecksumURLsFromDirectory fetches an HTTP directory listing and returns
-// URLs to files whose names contain "SUM" or "CHECKSUM" (case-insensitive),
-// ordered by preference: SHA256 first, then SHA512, then generic CHECKSUM.
-func scrapeChecksumURLsFromDirectory(baseURL string) ([]string, error) {
+// the URLs of its checksum files in preference order (see
+// extractChecksumLinksFromHTML). imageFilename ranks the image's own file first.
+func scrapeChecksumURLsFromDirectory(httpClient *http.Client, baseURL, imageFilename string) ([]string, error) {
 	if !strings.HasPrefix(baseURL, "https://") {
 		return nil, fmt.Errorf("directory URL must use HTTPS: %s", baseURL)
 	}
 
-	resp, err := http.Get(baseURL) //nolint:noctx // URLs derived from built-in registry
+	resp, err := httpClient.Get(baseURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
 	if err != nil {
 		return nil, fmt.Errorf("cannot fetch directory listing: %w", err)
 	}
@@ -170,37 +176,71 @@ func scrapeChecksumURLsFromDirectory(baseURL string) ([]string, error) {
 		return nil, fmt.Errorf("cannot read directory listing: %w", err)
 	}
 
-	return extractChecksumLinksFromHTML(string(data), baseURL), nil
+	return extractChecksumLinksFromHTML(string(data), baseURL, imageFilename), nil
 }
 
-// extractChecksumLinksFromHTML parses href attributes from an HTML directory
-// listing and returns absolute URLs for checksum files, sorted by preference.
-// Only relative links or links on the same HTTPS host are accepted to prevent
-// a compromised directory listing from redirecting checksum verification to an
-// attacker-controlled server.
-func extractChecksumLinksFromHTML(htmlContent string, baseURL string) []string {
-	baseHost := extractHostFromURL(baseURL)
-	var sha256URLs, sha512URLs, genericURLs []string
+// checksumSignatureSuffixes are detached-signature extensions; such files sit
+// next to checksum files but hold no hashes.
+var checksumSignatureSuffixes = []string{".GPG", ".SIG", ".ASC"}
 
+// unsupportedHashFileMarkers name checksum files for algorithms vmherd can't
+// verify (BLAKE2, MD5, SHA-1, SHA-224, SHA-384). Their hashes would be taken
+// for SHA-256/512 by length and fail as a misleading "image corrupted" mismatch.
+var unsupportedHashFileMarkers = []string{"B2SUM", "BLAKE2", "MD5", "SHA1SUM", "SHA224", "SHA384"}
+
+// isChecksumFileName reports whether an upper-cased link names a checksum file:
+// a SUMS/CHECKSUM list (Ubuntu, Debian, Fedora, Rocky) or a per-image
+// <image>.SHA256 file (Arch). Signatures and unsupported algorithms are excluded.
+func isChecksumFileName(upperLink string) bool {
+	upperFileName := upperLink[strings.LastIndex(upperLink, "/")+1:]
+	for _, signatureSuffix := range checksumSignatureSuffixes {
+		if strings.HasSuffix(upperFileName, signatureSuffix) {
+			return false
+		}
+	}
+	for _, unsupportedMarker := range unsupportedHashFileMarkers {
+		if strings.Contains(upperFileName, unsupportedMarker) {
+			return false
+		}
+	}
+	if strings.HasSuffix(upperFileName, ".SHA1") {
+		return false
+	}
+	return strings.Contains(upperFileName, "SUM") || strings.Contains(upperFileName, "SHA256") || strings.Contains(upperFileName, "SHA512")
+}
+
+// extractHrefTargets returns the href="..." targets of an HTML page in order.
+func extractHrefTargets(htmlContent string) []string {
+	var linkTargets []string
 	searchContent := htmlContent
 	for {
 		hrefIndex := strings.Index(searchContent, "href=\"")
 		if hrefIndex == -1 {
-			break
+			return linkTargets
 		}
 		searchContent = searchContent[hrefIndex+6:]
 		quoteEnd := strings.Index(searchContent, "\"")
 		if quoteEnd == -1 {
-			break
+			return linkTargets
 		}
-		linkTarget := searchContent[:quoteEnd]
+		linkTargets = append(linkTargets, searchContent[:quoteEnd])
 		searchContent = searchContent[quoteEnd:]
+	}
+}
 
+// extractChecksumLinksFromHTML parses href attributes from an HTML directory
+// listing and returns absolute URLs for checksum files: the image's own
+// <image>.<hash> file first, then SHA256, SHA512 and generic lists. Only links
+// on the listing's HTTPS host are kept, so a tampered listing can't redirect
+// verification to another server.
+func extractChecksumLinksFromHTML(htmlContent, baseURL, imageFilename string) []string {
+	baseHost := extractHostFromURL(baseURL)
+	upperImagePrefix := strings.ToUpper(imageFilename) + "."
+	var ownFileURLs, sha256URLs, sha512URLs, genericURLs []string
+
+	for _, linkTarget := range extractHrefTargets(htmlContent) {
 		upperLink := strings.ToUpper(linkTarget)
-		if !strings.Contains(upperLink, "SUM") && !strings.Contains(upperLink, "CHECKSUM") {
-			continue
-		}
-		if strings.HasSuffix(upperLink, ".GPG") || strings.HasSuffix(upperLink, ".SIG") || strings.HasSuffix(upperLink, ".ASC") {
+		if !isChecksumFileName(upperLink) {
 			continue
 		}
 
@@ -208,28 +248,25 @@ func extractChecksumLinksFromHTML(htmlContent string, baseURL string) []string {
 		if !strings.HasPrefix(linkTarget, "http") {
 			absoluteURL = baseURL + linkTarget
 		}
-
-		if !strings.HasPrefix(absoluteURL, "https://") {
-			continue
-		}
-		if extractHostFromURL(absoluteURL) != baseHost {
+		if !strings.HasPrefix(absoluteURL, "https://") || extractHostFromURL(absoluteURL) != baseHost {
 			continue
 		}
 
-		if strings.Contains(upperLink, "SHA256") {
+		switch {
+		case imageFilename != "" && strings.HasPrefix(upperLink, upperImagePrefix):
+			ownFileURLs = append(ownFileURLs, absoluteURL)
+		case strings.Contains(upperLink, "SHA256"):
 			sha256URLs = append(sha256URLs, absoluteURL)
-		} else if strings.Contains(upperLink, "SHA512") {
+		case strings.Contains(upperLink, "SHA512"):
 			sha512URLs = append(sha512URLs, absoluteURL)
-		} else {
+		default:
 			genericURLs = append(genericURLs, absoluteURL)
 		}
 	}
 
-	var result []string
-	result = append(result, sha256URLs...)
+	result := append(ownFileURLs, sha256URLs...)
 	result = append(result, sha512URLs...)
-	result = append(result, genericURLs...)
-	return result
+	return append(result, genericURLs...)
 }
 
 // extractHostFromURL returns the host portion of an HTTPS URL.
@@ -245,12 +282,12 @@ func extractHostFromURL(rawURL string) string {
 // fetchChecksumFromURL downloads a checksum file and extracts the expected
 // hash for the given filename. The algorithm is determined from three sources
 // in priority order: BSD-format line prefix, hex digest length, URL path name.
-func fetchChecksumFromURL(checksumURL string, filename string) (*checksumInfo, error) {
+func fetchChecksumFromURL(httpClient *http.Client, checksumURL string, filename string) (*checksumInfo, error) {
 	if !strings.HasPrefix(checksumURL, "https://") {
 		return nil, fmt.Errorf("checksum URL must use HTTPS: %s", checksumURL)
 	}
 
-	resp, err := http.Get(checksumURL) //nolint:noctx // URLs come from the built-in registry, not user input
+	resp, err := httpClient.Get(checksumURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
 	if err != nil {
 		return nil, fmt.Errorf("cannot download checksum file: %w", err)
 	}
