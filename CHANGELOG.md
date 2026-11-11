@@ -4,6 +4,18 @@ All notable releases are documented here.
 
 ---
 
+## v0.4.2
+
+**2026-11-11** — `reload` no longer loses a VM when its image can't be downloaded; built with Go 1.27.4
+
+### Fixed
+- **`vmherd reload` no longer destroys a VM it can't recreate.** It used to shut the VM down and delete its disk first, and only then download the image; if the download failed (vendor removed the file, no network, checksum mismatch), the VM was gone with nothing in its place. `reload` now downloads and verifies every image it needs before it touches any VM, and on failure stops with "reload stopped before changing any VM — the existing VMs and their disks are untouched". `up` and `reload` now create VMs through the same code.
+
+### Security
+- Built with Go 1.27.4, which fixes [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) in `net/http` (reachable from vmherd's image downloads).
+
+---
+
 ## v0.4.1
 
 **2026-11-10** — Rocky/AlmaLinux VMs work, shell steps fail fast, readable console logs
