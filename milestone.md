@@ -20,9 +20,9 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 7 | 0 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
-| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership | 8 | 1 |
+| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
 
 ---
@@ -471,8 +471,8 @@ Note: the default network name collision is handled under M1.2.
 - [ ] **M3.10 — Coverage threshold** · Low
   - **Files:** `.github/workflows/pr-quality.yml`
   - **Problem:** The 30% threshold is too low to catch regressions.
-  - **Fix:** Raise it step by step as M2.3 lands (40 → 50 → 60%).
-  - **Done when:** The threshold is ≥ 60%.
+  - **Fix:** Raise it step by step as M2.3 lands (40 → 50 → 60%). Also give `cmd/vmherd` its own floor, so pure packages can't hide it: 40% once M2.3 lands (it is 4% on 2026-11-11), then raised with the total.
+  - **Done when:** The total threshold is ≥ 60% and the `cmd/vmherd` floor is enforced in CI.
 
 ---
 
@@ -532,6 +532,16 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** Stale LLM review output ("ALL FIXED (pending commit)") lives next to the code and can mislead agents.
   - **Fix:** Move it to `docs/reviews/archive/`, or delete it once this file supersedes it. Keep `checklist.md` only if it's updated to match CLAUDE.md.
   - **Done when:** `reviews/` contains no stale status claims.
+
+- [ ] **M4.7 — Write the test first (rule in CLAUDE.md)** · Med
+  - **Files:** `CLAUDE.md` (Development Workflow), this file's "How to use" section
+  - **Problem:** Tests have been written after the fix, in the same commit (reproduce on the testbed → fix → regression test). That catches regressions, but nothing proves the test fails without the fix, and feature items describe their tests only loosely. Coverage is high where logic is pure (config 88%, cloudinit 84%) and low where the bugs were (`cmd/vmherd` 4%), because command code calls `virsh`, `sudo` and `ssh` directly.
+  - **Rule to add:**
+    - Every bug fix starts with a test that fails for the reported reason: a unit test where the code allows it, otherwise an e2e case (M6.4). The commit message or the item's result note says how the test failed before the fix.
+    - Every feature item's "Done when" names its tests before implementation starts; they are written first, then the code.
+    - Testbed checks stay, for what tests can't show (other distros, real hardware), but no longer replace a test.
+    - Where `cmd/` code can't be tested yet, the item says so and points at M2.3, instead of skipping the test silently.
+  - **Done when:** CLAUDE.md's Development Workflow and "How to use this file" carry the rule, and the next bug fix after it follows it.
 
 ---
 
@@ -655,6 +665,18 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
   - **On .71:** first full run found M1.20 (5 distros) and Debian's missing 9p; after the fix all 8 pass in 14.6 min (58 s Debian … 196 s Arch). A build with Rocky wrongly marked as having 9p (via `go test -overlay`, working tree untouched) fails with "unexpected missing-9p report" and "the fixed VM's first boot should succeed", and its cleanup leaves no domain, network or disk. The first full run on the CI runner itself is the push to main.
   - **Run it yourself:** `go test -tags integration -run TestDistroLifecycle -v ./test/e2e/` on a libvirt host with passwordless sudo; add `VMHERD_E2E_IMAGES=ubuntu:noble` for one distro (~3 min). Ubuntu images must already be cached while cloud-images.ubuntu.com is unreachable.
 
+- [ ] **M6.9 — Run the Terramino acceptance scenarios in CI** · Med
+  - **Depends on:** M6.4 (e2e harness)
+  - **Files:** `test/acceptance/terramino-single/`, `test/acceptance/terramino-multi/`, `test/e2e/` (new scenario test), `.github/workflows/integration.yml`
+  - **Problem:** The two Terramino projects (ported from HashiCorp's learn-vagrant-get-started tutorial) are vmherd's only user-level acceptance scenarios, but their steps (`curl` the forwarded ports, `provision`, `down`/`up`) are comments in the Herdfiles and nothing runs them. The M6.4 e2e test checks vmherd's own behaviour per distro; it doesn't cover port forwarding, `type: file` steps, extra shares or a real multi-VM application. Both Herdfiles also use 192.168.122.x, libvirt's stock `default` subnet (the M1.2 collision), and fixed host ports 8080/8081/6379 that may be taken on the runner.
+  - **Design:**
+    - The Herdfiles move to their own subnets (192.168.240.0/24 and 192.168.241.0/24), so they no longer collide with libvirt's `default` network. Host ports stay as in the tutorial, so the files remain copy-pasteable for users.
+    - A `TestAcceptanceScenarios` test in `test/e2e/` (same binary handling, state dir and leftover cleanup as M6.4) copies each scenario directory to a temp project. Before `up` it checks the scenario's host ports are free and fails with the port and its user if not.
+    - Steps per scenario, as the Herdfile comments describe: `up` (exit 0) → HTTP 200 from the frontend and the backend `/api/scores` through the forwarded ports → `ssh` into a VM → `provision` (exit 0) → `down` + `up` with a marker file kept → `destroy` (no leftovers, port-forward tunnels gone). Multi: the backend reaches redis and the frontend reaches the backend over the project network.
+    - The comments in the Herdfiles become a short pointer to the test, so the steps live in one place.
+    - The scenarios download packages inside the guests, so they need internet and take longer: they run nightly and on manual dispatch only (a `VMHERD_E2E_SCENARIOS` switch), not on pull requests or pushes.
+  - **Done when:** both scenarios pass nightly on the runner; a broken provisioning script in a copy makes the run fail on the HTTP check, naming the port.
+
 ### Phase 6C — Configuration changes
 
 - [ ] **M6.5 — Tell the user when the Herdfile no longer matches an existing VM** · High
@@ -697,7 +719,7 @@ Direction (decided 2026-11-11): vmherd manages a project's whole development env
 **Not building:** a provisioning language of its own, a Dev Container implementation, a template registry or marketplace, VM cloning, `depends_on` start ordering (playbook order covers it), multi-cloud or remote hosts, a GUI.
 
 **Order across milestones** (reliability before breadth):
-M1.19 → M1.20 → M6.4 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
+M1.19 → M1.20 → M6.4 → M4.7 → M6.9 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
 M5.2 (addresses that survive a rebuild) and M3.6 (a per-project `known_hosts`) come before M7 because a generated SSH config and Ansible inventory are only as good as the addresses and host keys in them.
 
 - [ ] **M7.1 — `vmherd ssh-config`: let other tools connect** · Feature
