@@ -22,6 +22,9 @@ const (
 	cloudInitLogTailLines = 20
 	// cloudInitLogReadTimeout bounds reading that log excerpt over SSH.
 	cloudInitLogReadTimeout = 30 * time.Second
+	// grepNoMatchExitCode is grep's exit code when no line matched; higher
+	// codes mean the search itself failed.
+	grepNoMatchExitCode = 1
 )
 
 // firstBootResult is one VM's first-boot cloud-init outcome.
@@ -105,23 +108,44 @@ func describeFirstBootFailure(vmConfig config.VM, keyPath, sshUser, statusOutput
 		logExcerpt = fmt.Sprintf("(cannot read %s: %v)", cloudinit.OutputLogPath, err)
 	}
 
-	summary := cloudinit.FailedStepLine(logExcerpt)
-	if cloudinit.ReportsMissingNineP(logExcerpt) {
+	markerLines, markerSearchErr := readFailureMarkerLines(vmConfig, keyPath, sshUser)
+	failureEvidence := markerLines + "\n" + logExcerpt
+	summary := cloudinit.FailedStepLine(failureEvidence)
+	if cloudinit.ReportsMissingNineP(failureEvidence) {
 		summary = joinFailureSummaries(summary, missingNinePSummary(vmConfig.Name))
 	}
 	if summary == "" {
 		summary = "cloud-init reported an error:\n" + indentLines(strings.TrimSpace(statusOutput))
+	}
+	if markerSearchErr != nil {
+		summary = joinFailureSummaries(summary, fmt.Sprintf("cannot search %s for vmherd's failure lines: %v",
+			cloudinit.OutputLogPath, markerSearchErr))
 	}
 	return fmt.Errorf("first-boot provisioning failed: %s\n  last %d lines of %s:\n%s\n  full log: vmherd ssh %s -- sudo cat %s",
 		summary, cloudInitLogTailLines, cloudinit.OutputLogPath, indentLines(strings.TrimRight(logExcerpt, "\n")),
 		vmConfig.Name, cloudinit.OutputLogPath)
 }
 
+// readFailureMarkerLines returns the failed-step and missing-9p lines from the
+// guest's whole cloud-init output log. No such line is not an error (grep
+// exits 1); an unreachable guest or unreadable log (exit 2) is.
+func readFailureMarkerLines(vmConfig config.VM, keyPath, sshUser string) (string, error) {
+	searchCommand := "sudo " + cloudinit.FailureMarkerSearchCommand(cloudinit.OutputLogPath)
+	markerLines, exitCode, err := ssh.RunCommandWithTimeout(keyPath, sshUser, vmConfig.Network.IP, searchCommand, cloudInitLogReadTimeout)
+	if err != nil {
+		return "", err
+	}
+	if exitCode > grepNoMatchExitCode {
+		return "", fmt.Errorf("'%s' exited with %d", searchCommand, exitCode)
+	}
+	return markerLines, nil
+}
+
 // missingNinePSummary explains a share that can't be mounted because the
 // guest kernel lacks 9p, and how to bring the VM up without shares.
 func missingNinePSummary(vmName string) string {
 	return fmt.Sprintf("shared folders can't be mounted: %s's kernel has no 9p support "+
-		"(RHEL-family kernels such as Rocky and AlmaLinux are built without it) — "+
+		"(RHEL-family kernels such as Rocky and AlmaLinux, and Debian's cloud kernel, are built without it) — "+
 		"set 'shared_folders: []' for %s in the Herdfile and run 'vmherd reload %s'", vmName, vmName, vmName)
 }
 

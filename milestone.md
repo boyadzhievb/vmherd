@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 19 | 19 |
+| M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -316,6 +316,15 @@ Note: the default network name collision is handled under M1.2.
   - **Rule for later items:** never remove something that exists (a VM, a disk, a cached image, a lock entry) until its replacement is on disk and verified. M6.1 and M6.2 apply it to `update-images`.
   - **Done when:** a unit test shows the destroy step is not reached when the image can't be resolved or cached; on .71, `reload` of a running VM with its `images:` URL changed to a 404 exits 1 and the VM is still running with its disk intact.
   - **Result (2026-11-11):** New `checkReloadPrerequisites` (`cmd/vmherd/reload.go`) runs right after the VMs are selected, before keys, network or any VM is touched: it calls `up`'s `resolveAndCacheImages` for every VM to reload, and `vm.DetectHostIdentity` once if any of them has shares. Either failing stops `reload` with the cause plus "reload stopped before changing any VM — the existing VMs and their disks are untouched". `reloadSingleVM` takes the resolved image and calls `up`'s `createSingleVM`; the duplicate `createVM` in reload.go (a near-copy that resolved the image itself) is removed, so `up` and `reload` create VMs through one path. The bridge/network check already ran before the loop. Test: `TestCheckReloadPrerequisitesStopsWhenImageUnavailable` (vendor unreachable via `https://127.0.0.1:1/…`, image not defined). The ordering itself is not unit-testable until M2.3; it was checked on .71 instead. **Reproduced on .71 with v0.4.1** (`~/test-m119`, one noble VM): image URL changed to an uncached file → `reload box` shut the VM down, undefined it, deleted disk and seed, then failed the download; exit 1, no VM left. **With the fix:** same change → exit 1 with the message above, VM still running, disk and seed present, a marker file written before the reload still there. A normal `reload` still rebuilds (new machine-id, marker gone, exit 0). Note: .71 had no route to cloud-images.ubuntu.com on 2026-11-11 (HEAD timed out), so the failure exercised was "vendor unreachable", not a 404; both come out of `EnsureCached`'s availability check. Test VM and network destroyed afterwards.
+
+- [x] **M1.20 — `up` doesn't name the failed step on most distros** · Med
+  - **Files:** `internal/cloudinit/status.go`, `cmd/vmherd/first_boot.go` (`describeFirstBootFailure`), README, `test/e2e/e2e_test.go`
+  - **Found by:** the first full M6.4 e2e run on .71 (2026-11-11).
+  - **Problem:** When first boot fails, vmherd looks for its marker lines (failed step, missing 9p) only in the last 20 lines of the guest's `/var/log/cloud-init-output.log`. On ubuntu:resolute, Fedora 44/45, Debian trixie and Arch, SSH host-key output is written after the provisioning output and pushes the markers out of that window, so `up` printed only "cloud-init reported an error" and the raw `cloud-init status`. M1.16 and M1.18 were verified on noble, Rocky and Alma, where the order happens to differ.
+  - **Also found:** Debian's `genericcloud` image runs the trimmed cloud kernel without 9p, so the default `/vagrant` share fails there as on Rocky/Alma (`mount: /vagrant: unknown filesystem type '9p'`). The M1.18 check already printed its marker in the guest; the missed marker (above) hid it.
+  - **Fix:** a second SSH command greps the whole output log for the two markers (`cloudinit.FailureMarkerSearchCommand`, run with sudo; grep exit 1 = no markers, higher = the search failed and is reported). The step and 9p summaries come from those lines plus the tail; the tail is still shown for context. The missing-9p message and README name Debian's cloud kernel. The e2e table expects no 9p for Debian, and checks that the `fixed` VM's first boot succeeds wherever 9p exists (the first run didn't catch Debian's share failure in `up` for that reason).
+  - **Done when:** a unit test runs the search command on a log with the markers 50 lines before its end and on a clean log; the full e2e table on .71 names the failed step on every distro and reports no 9p on Debian, Rocky and Alma.
+  - **Result (2026-11-11):** `TestFailureMarkerSearchFindsLinesOutsideTheTail` runs the generated command with `sh` on a log with both markers followed by 50 lines (finds both, not the "running step" line) and on a clean log (exit 1). Second full e2e run on .71 (`e2e-full2.log`): all 8 distros pass, each `up` names `vmherd: provisioning step 2 of 2`, and Debian, Rocky and Alma report the missing 9p.
 
 ---
 
@@ -685,7 +694,7 @@ Direction (decided 2026-11-11): vmherd manages a project's whole development env
 **Not building:** a provisioning language of its own, a Dev Container implementation, a template registry or marketplace, VM cloning, `depends_on` start ordering (playbook order covers it), multi-cloud or remote hosts, a GUI.
 
 **Order across milestones** (reliability before breadth):
-M1.19 → M6.4 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
+M1.19 → M1.20 → M6.4 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
 M5.2 (addresses that survive a rebuild) and M3.6 (a per-project `known_hosts`) come before M7 because a generated SSH config and Ansible inventory are only as good as the addresses and host keys in them.
 
 - [ ] **M7.1 — `vmherd ssh-config`: let other tools connect** · Feature

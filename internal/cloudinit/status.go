@@ -1,6 +1,7 @@
 package cloudinit
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -55,6 +56,16 @@ func ClassifyStatusExitCode(exitCode int) FirstBootOutcome {
 		// 1 (critical error) and any code cloud-init doesn't document.
 		return FirstBootFailed
 	}
+}
+
+// FailureMarkerSearchCommand returns a guest shell command that prints every
+// line of logPath the runcmd script wrote to report a failure (failed step,
+// missing 9p). The whole log is searched: on many distros later boot output
+// (SSH host keys) pushes those lines out of the log's tail. Like grep, it
+// exits 1 when there are none.
+func FailureMarkerSearchCommand(logPath string) string {
+	return fmt.Sprintf("grep -F -e %s -e %s -- %s",
+		quoteForShell(FailedStepMarker+" "), quoteForShell(MissingNinePMarker), quoteForShell(logPath))
 }
 
 // FailedStepLine returns the line the runcmd script printed for a failed

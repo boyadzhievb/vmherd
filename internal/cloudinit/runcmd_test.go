@@ -191,3 +191,46 @@ func TestShellStepStopsAtFirstFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestFailureMarkerSearchFindsLinesOutsideTheTail runs the search command on a
+// log whose failure lines are followed by more boot output than the tail
+// shows, as on Debian, Fedora and Arch, and on a log without failures.
+func TestFailureMarkerSearchFindsLinesOutsideTheTail(t *testing.T) {
+	failedStepLine := FailedStepMarker + " 2 of 2 (exit 1) failed; later steps were skipped"
+	missingNinePLine := MissingNinePMarker + ", which this guest kernel does not have"
+	var logContent strings.Builder
+	logContent.WriteString("Cloud-init v. 25.1 running 'modules:final'\n")
+	logContent.WriteString("vmherd: running provisioning step 2 of 2\n")
+	logContent.WriteString(missingNinePLine + "\n" + failedStepLine + "\n")
+	for lineNumber := 0; lineNumber < 50; lineNumber++ {
+		logContent.WriteString("|  ssh host key randomart  |\n")
+	}
+	logPath := filepath.Join(t.TempDir(), "cloud-init-output.log")
+	if err := os.WriteFile(logPath, []byte(logContent.String()), 0o600); err != nil {
+		t.Fatalf("writing log: %v", err)
+	}
+
+	output, err := exec.Command("sh", "-c", FailureMarkerSearchCommand(logPath)).Output()
+	if err != nil {
+		t.Fatalf("search command: %v", err)
+	}
+	if gotLine := FailedStepLine(string(output)); gotLine != failedStepLine {
+		t.Errorf("FailedStepLine(search output) = %q, want %q", gotLine, failedStepLine)
+	}
+	if !ReportsMissingNineP(string(output)) {
+		t.Errorf("search output %q does not report the missing 9p", output)
+	}
+	if strings.Contains(string(output), "running provisioning step") {
+		t.Errorf("search output %q includes the step start line", output)
+	}
+
+	cleanLogPath := filepath.Join(t.TempDir(), "clean.log")
+	if err := os.WriteFile(cleanLogPath, []byte("Cloud-init v. 25.1 finished\n"), 0o600); err != nil {
+		t.Fatalf("writing log: %v", err)
+	}
+	err = exec.Command("sh", "-c", FailureMarkerSearchCommand(cleanLogPath)).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Errorf("search on a log without failure lines: want exit 1, got %v", err)
+	}
+}
