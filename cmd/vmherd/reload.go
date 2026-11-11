@@ -7,7 +7,6 @@ import (
 
 	"github.com/boyadzhievb/vmherd/internal/cloudinit"
 	"github.com/boyadzhievb/vmherd/internal/config"
-	"github.com/boyadzhievb/vmherd/internal/image"
 	"github.com/boyadzhievb/vmherd/internal/ssh"
 	"github.com/boyadzhievb/vmherd/internal/ui"
 	"github.com/boyadzhievb/vmherd/internal/vm"
@@ -40,6 +39,11 @@ Examples:
 				return err
 			}
 
+			resolvedImages, err := checkReloadPrerequisites(vmsToReload, project.Herdfile.Images)
+			if err != nil {
+				return err
+			}
+
 			gatewayIP, err := project.GatewayIP()
 			if err != nil {
 				return err
@@ -64,7 +68,9 @@ Examples:
 			var recreatedVMs []config.VM
 			var reloadFailures []error
 			for _, vmConfig := range vmsToReload {
-				if err := reloadSingleVM(project, vmConfig, pubKey, gatewayIP, dnsServer); err != nil {
+				err := reloadSingleVM(project, vmConfig, resolvedImages[vmConfig.Image],
+					strings.TrimSpace(pubKey), gatewayIP, dnsServer)
+				if err != nil {
 					reloadFailures = append(reloadFailures, fmt.Errorf("%s: %w", vmConfig.Name, err))
 					continue
 				}
@@ -86,9 +92,31 @@ Examples:
 	}
 }
 
+// checkReloadPrerequisites downloads and verifies every image the VMs need and
+// checks the host identity used for shared folders, before reload removes
+// anything: a VM is never destroyed when its replacement can't be created.
+func checkReloadPrerequisites(vmsToReload []config.VM, images map[string]string) (map[string]resolvedImage, error) {
+	resolvedImages, err := resolveAndCacheImages(vmsToReload, images)
+	if err != nil {
+		return nil, fmt.Errorf("%w\n\nreload stopped before changing any VM — the existing VMs and their disks are untouched", err)
+	}
+	for _, vmConfig := range vmsToReload {
+		if len(vmConfig.SharedFolders) == 0 {
+			continue
+		}
+		if _, err := vm.DetectHostIdentity(); err != nil {
+			return nil, fmt.Errorf("preparing shared folders for %s: %w\n\nreload stopped before changing any VM — "+
+				"the existing VMs and their disks are untouched", vmConfig.Name, err)
+		}
+		break
+	}
+	return resolvedImages, nil
+}
+
 // reloadSingleVM stops and destroys a VM (disk and seed included) and creates
 // it again from the current Herdfile under the project-unique domain name.
-func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, defaultGateway, dnsServer string) error {
+// img must already be downloaded and verified (checkReloadPrerequisites).
+func reloadSingleVM(project *config.Project, vmConfig config.VM, img resolvedImage, pubKey, defaultGateway, dnsServer string) error {
 	if err := stopPortForwarding(project, vmConfig); err != nil {
 		return err
 	}
@@ -104,7 +132,7 @@ func reloadSingleVM(project *config.Project, vmConfig config.VM, pubKey, default
 
 	// The old domain is gone, so recreate under the project-unique name.
 	project.DropLegacyDomainName(vmConfig.Name)
-	return createVM(project, vmConfig, project.DomainName(vmConfig.Name), pubKey, defaultGateway, dnsServer)
+	return createSingleVM(project, vmConfig, img, pubKey, defaultGateway, dnsServer)
 }
 
 // shutdownAndDestroy gracefully stops a VM (forcing only after the shutdown
@@ -132,75 +160,5 @@ func shutdownAndDestroy(domainName, vmName string) error {
 	if err := vm.Destroy(domainName); err != nil {
 		return fmt.Errorf("cannot destroy %s before reload: %w — try 'vmherd destroy %s' manually", vmName, err, vmName)
 	}
-	return nil
-}
-
-// createVM resolves the image, generates cloud-init files, builds the seed ISO,
-// and creates a new VM.
-func createVM(project *config.Project, vmConfig config.VM, domainName, pubKey, defaultGateway, dnsServer string) error {
-	entry, err := image.Resolve(vmConfig.Image, project.Herdfile.Images)
-	if err != nil {
-		return err
-	}
-
-	imagePath, err := image.EnsureCached(entry)
-	if err != nil {
-		return err
-	}
-
-	ui.Printf("Creating %s (%s, %dMB, %d CPUs)...\n",
-		vmConfig.Name, vmConfig.Image, vmConfig.Memory, vmConfig.CPUs)
-
-	sharedMounts := buildSharedMounts(vmConfig)
-	announceSharedMounts(vmConfig.Name, sharedMounts)
-	shareIdentity, err := resolveShareIdentity(vmConfig.Name, sharedMounts)
-	if err != nil {
-		return err
-	}
-
-	macAddress, err := vm.GenerateMACAddress()
-	if err != nil {
-		return err
-	}
-
-	ciFiles, err := cloudinit.GenerateFiles(
-		project.StateDir, vmConfig,
-		project.Herdfile.SSH.User, project.Herdfile.SSH.Password, strings.TrimSpace(pubKey),
-		defaultGateway, dnsServer, macAddress, buildCloudInitMounts(sharedMounts), shareIdentity.sshUserUID,
-	)
-	if err != nil {
-		return err
-	}
-
-	seedPath := project.SeedPath(vmConfig.Name)
-	if err := cloudinit.BuildAndInstallSeed(ciFiles, seedPath); err != nil {
-		return err
-	}
-
-	var consoleLogPath string
-	if vmConfig.ConsoleLog {
-		consoleLogPath = project.ConsoleLogPath(vmConfig.Name)
-	}
-
-	if err := vm.Create(vm.CreateOptions{
-		VMName:           vmConfig.Name,
-		DomainName:       domainName,
-		DiskPath:         project.DiskPath(vmConfig.Name),
-		SeedPath:         seedPath,
-		NetworkName:      project.Herdfile.Network.Name,
-		BridgeName:       project.Herdfile.Network.Bridge,
-		MACAddress:       macAddress,
-		Memory:           vmConfig.Memory,
-		CPUs:             vmConfig.CPUs,
-		ImagePath:        imagePath,
-		DiskSize:         vmConfig.Disk,
-		SharedFolders:    sharedMounts,
-		QEMUProcessLabel: shareIdentity.qemuProcessLabel,
-		ConsoleLogPath:   consoleLogPath,
-	}); err != nil {
-		return err
-	}
-
-	ui.Printf("%s created.\n", vmConfig.Name)
 	return nil
 }

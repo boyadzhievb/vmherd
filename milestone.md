@@ -17,7 +17,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 19 | 18 |
+| M1 | Correctness of existing features | 19 | 19 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
@@ -308,13 +308,14 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 Note: the default network name collision is handled under M1.2.
 
-- [ ] **M1.19 — `reload` destroys the VM before it knows the image is available** · High
+- [x] **M1.19 — `reload` destroys the VM before it knows the image is available** · High
   - **Files:** `cmd/vmherd/reload.go` (`newReloadCmd`, `reloadSingleVM`, `createVM`), `cmd/vmherd/up.go` (`resolveAndCacheImages`)
   - **Problem (found by reading the code, 2026-11-11):** `reloadSingleVM` stops the VM and removes its domain, disk and seed, and only then `createVM` resolves and downloads the image. If the image isn't cached and the download fails (vendor removed the file, no network, checksum mismatch, image missing from `images:`), the old VM is already gone and nothing replaces it. `up` does this in the right order: `resolveAndCacheImages` runs before any VM is created.
   - **How Vagrant does it:** `vagrant reload` keeps the disk, so the question doesn't arise; `vagrant destroy && vagrant up` has the same exposure when the box is no longer downloadable.
   - **Fix:** In `reload`, call `resolveAndCacheImages` for all VMs to reload before the first one is touched, and stop with the download error if any image is unavailable ("nothing was changed"). Pass the resolved image into `createVM` instead of resolving again there, so `up` and `reload` share one path. Check the other things `createVM` can refuse before the destroy as well (share identity, bridge exists).
   - **Rule for later items:** never remove something that exists (a VM, a disk, a cached image, a lock entry) until its replacement is on disk and verified. M6.1 and M6.2 apply it to `update-images`.
   - **Done when:** a unit test shows the destroy step is not reached when the image can't be resolved or cached; on .71, `reload` of a running VM with its `images:` URL changed to a 404 exits 1 and the VM is still running with its disk intact.
+  - **Result (2026-11-11):** New `checkReloadPrerequisites` (`cmd/vmherd/reload.go`) runs right after the VMs are selected, before keys, network or any VM is touched: it calls `up`'s `resolveAndCacheImages` for every VM to reload, and `vm.DetectHostIdentity` once if any of them has shares. Either failing stops `reload` with the cause plus "reload stopped before changing any VM — the existing VMs and their disks are untouched". `reloadSingleVM` takes the resolved image and calls `up`'s `createSingleVM`; the duplicate `createVM` in reload.go (a near-copy that resolved the image itself) is removed, so `up` and `reload` create VMs through one path. The bridge/network check already ran before the loop. Test: `TestCheckReloadPrerequisitesStopsWhenImageUnavailable` (vendor unreachable via `https://127.0.0.1:1/…`, image not defined). The ordering itself is not unit-testable until M2.3; it was checked on .71 instead. **Reproduced on .71 with v0.4.1** (`~/test-m119`, one noble VM): image URL changed to an uncached file → `reload box` shut the VM down, undefined it, deleted disk and seed, then failed the download; exit 1, no VM left. **With the fix:** same change → exit 1 with the message above, VM still running, disk and seed present, a marker file written before the reload still there. A normal `reload` still rebuilds (new machine-id, marker gone, exit 0). Note: .71 had no route to cloud-images.ubuntu.com on 2026-11-11 (HEAD timed out), so the failure exercised was "vendor unreachable", not a 404; both come out of `EnsureCached`'s availability check. Test VM and network destroyed afterwards.
 
 ---
 
