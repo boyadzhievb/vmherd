@@ -22,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
-| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership | 8 | 0 |
+| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership | 8 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
 
 ---
@@ -641,7 +641,7 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
   - **🧭 Decision after the numbers:** tune the default mount options, and/or raise the priority of M5.3/M5.4, and/or reopen virtiofs with a user-run `virtiofsd` (M0.10 notes). The README gets a short "share performance" section with the measured numbers either way.
   - **Done when:** the table of results is in this item, the decision is recorded, and any option change is covered by the existing cloud-init mount tests.
 
-- [ ] **M6.4 — Integration tests across distros, through the CLI** · High
+- [x] **M6.4 — Integration tests across distros, through the CLI** · High
   - **Files:** new `test/e2e/` (build tag `integration`), `.github/workflows/integration.yml`, `test/acceptance/*`
   - **Problem:** The one lifecycle test calls internal packages with `ubuntu:noble`. M1.12–M1.18 were all distro-specific or in `cmd/`, and all found by hand. The acceptance Herdfiles are not run by CI.
   - **Design:**
@@ -651,6 +651,9 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
     - CI: pull requests run `ubuntu:noble` only; pushes to `main` and a nightly schedule run the full table, one distro at a time unless the runner has room for more (check its RAM before choosing `-parallel`). Raise the 15-minute timeout to fit. Images are cached on the runner; the nightly run is also the early warning for vendor URL changes (M1.12).
     - Keep the fork-PR guard from M0.3.
   - **Done when:** the full table is green on the self-hosted runner, a deliberately broken distro case turns the run red, and the old `TestFullVMLifecycle` is removed or reduced to what the e2e test doesn't cover.
+  - **Result (2026-11-11):** New `test/e2e/e2e_test.go` (tag `integration`). `TestMain` builds `./cmd/vmherd`, or uses `VMHERD_E2E_BINARY` (hosts whose Go is older than go.mod, like .71). Per distro, one project in a temp dir with its own `VMHERD_STATE_DIR` and a /24 at 192.168.230+index: VM `fixed` (static .10, default `/vagrant` share, one step) and VM `dhcp` (no shares, step 2 fails at its first command). Phases: first `up` (exit 1; names step 2 of 2; missing 9p reported exactly where expected; `fixed` first boot succeeds where 9p exists) → `status` (static IP, DHCP lease in the subnet, running) → step results over `ssh` (step 2 stopped before its second command) → share both ways with host-UID ownership (9p distros) → `provision fixed` ok, `provision dhcp` exit 1 naming step 2 → `restart` → `down` (both shut off) → `up` (disk kept) → `destroy` (no domain, disk, seed or network with the project prefix). Leftovers of an aborted run are removed before each distro and after a failure. `VMHERD_E2E_IMAGES` picks a subset. Table: ubuntu noble/resolute, fedora 44/45, debian trixie, rocky 9, almalinux 9, arch latest; Debian/Rocky/Alma expect no 9p (Debian `genericcloud` = cloud kernel, see M1.20). `internal/integration_test.go` (`TestFullVMLifecycle`) removed: everything it did is covered. Workflow: PRs run `ubuntu:noble`; pushes to main, nightly 02:00 UTC and manual dispatch (`images` input) run the full table; `concurrency` queues runs on the single runner; runner RAM/CPU/disk logged; job timeout 150 min (go test 140 min).
+  - **On .71:** first full run found M1.20 (5 distros) and Debian's missing 9p; after the fix all 8 pass in 14.6 min (58 s Debian … 196 s Arch). A build with Rocky wrongly marked as having 9p (via `go test -overlay`, working tree untouched) fails with "unexpected missing-9p report" and "the fixed VM's first boot should succeed", and its cleanup leaves no domain, network or disk. The first full run on the CI runner itself is the push to main.
+  - **Run it yourself:** `go test -tags integration -run TestDistroLifecycle -v ./test/e2e/` on a libvirt host with passwordless sudo; add `VMHERD_E2E_IMAGES=ubuntu:noble` for one distro (~3 min). Ubuntu images must already be cached while cloud-images.ubuntu.com is unreachable.
 
 ### Phase 6C — Configuration changes
 
