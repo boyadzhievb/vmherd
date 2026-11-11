@@ -22,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
-| M6 | Team adoption: locked images, config changes, snapshots, distro tests | 7 | 0 |
+| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership | 8 | 0 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
 
 ---
@@ -570,9 +570,30 @@ Note: the default network name collision is handled under M1.2.
 
 Source: an outside adoption checklist (image updates, reproducibility, snapshots, provisioning, shared folders, networking, lifecycle, security, testing, maintenance) checked against the code on 2026-11-11. Gaps already tracked elsewhere keep their items: stable addresses (M5.2), host-key pinning (M3.6), vendor signatures (M3.3), release gating (M3.9), orphaned VMs (M2.2). M6 holds the gaps that had no item, plus the detailed plan for image pinning.
 
-**Order:** see "Order across milestones" under M7 — M6.4 (distro tests) goes first because it protects every later item; M6.6 waits for M2.1.
+**Order:** see "Order across milestones" under M7 — M6.4 (distro tests) goes first because it protects every later item, then M6.8 (ownership) before `Herd.lock` makes copying and cloning projects routine; M6.6 waits for M2.1.
 
 ### Phase 6A — Reproducible images
+
+- [ ] **M6.8 — 🔬 Record which project owns each domain and network; refuse to share them** · High
+  - **Files:** `internal/vm/domain.go` (domain XML `<metadata>`), `internal/network/network.go` (network XML `<metadata>`), new `internal/ownership/` (read/compare), `cmd/vmherd/up.go`, `reload.go`, `status.go`, `destroy.go`, `cmd/vmherd/network_setup.go`, README
+  - **Problem (raised 2026-11-11 on .71):** vmherd tells projects apart only by the project directory path (state-dir hash in domain names). Nothing in libvirt records who owns a domain or network, and the Herdfile doesn't know either. Two cases go wrong:
+    - **Copied Herdfile or cloned repo:** the copy is a new project, so `status` says "not created" and `up` builds a second set of VMs — but with the original's `network.name` and static IPs. It most likely attaches to the original's network and hands out the same addresses. 🔬 Reproduce on .71 before fixing (copy `~/test-v042`'s Herdfile to a second directory, `up` both).
+    - **Moved or renamed project directory:** vmherd no longer finds its VMs and says "not created"; the old VMs keep running as orphans `destroy` can't reach.
+  - **How Vagrant does it:** `.vagrant/` in the project directory holds machine IDs, and `vagrant global-status` reads a global machine index (`~/.vagrant.d/data/machine-index/index`) listing every machine with its directory. The index goes stale when a directory is deleted (`global-status --prune`). Vagrant does not stop a copied Vagrantfile from reusing the same private-network IPs.
+  - **Design:**
+    - Every domain and network vmherd defines carries `<metadata><vmherd:owner xmlns:vmherd="https://github.com/boyadzhievb/vmherd/ns/owner/1" project-dir="…" state-dir="…" vm="…"/></metadata>`. libvirt is the record, so it can't go stale or be lost separately from the object. Read back with `virsh dumpxml` / `net-dumpxml`.
+    - `up`/`reload`: before creating anything, refuse when the Herdfile's network name, subnet or a static IP belongs to another project, naming the owner: `network vmherd-test-m117-b24a19f7 belongs to /home/bojan/test-m117 — this Herdfile looks copied; run 'vmherd init' in a scratch directory for a free network name and subnet`. Subnet and IP overlaps are checked against every labelled vmherd network and domain, not only same-named ones.
+    - `status`: when a VM is "not created" but a labelled domain with the same Herdfile VM name and network exists under another project directory, say so (`created by /old/path — moved or copied project?`). For a directory that no longer exists, point to `vmherd destroy --project /old/path` (or the cleanup path M2.2 settles on).
+    - New `vmherd status --all`: every vmherd domain on the host (name prefix `vmherd-`), sorted by project directory then VM name, with columns VM, PROJECT DIRECTORY, STATE, IP. `(directory missing)` marks orphans. This is `vagrant global-status` without a separate index. Where the directory comes from, in order:
+      1. the M6.8 label;
+      2. unlabelled domains: the source of the share mounted at `/vagrant` in the domain XML (`<filesystem><source dir=…>`) — the default share is the project directory itself; shown with a `?` because a user-defined share may point elsewhere;
+      3. otherwise the state-dir basename (`<project>-<hash>`) as `unknown (<project>)` — the hash is of the absolute path and can't be reversed.
+    - Found on .71 (2026-11-11): the three running `vmherd-vm-deploy-32bab7cf-*` domains were only traceable through their share source, `/home/bojan/actions-runner/_work/ccattler/ccattler/test/e2e/vm-deploy` (a CI checkout); nothing else on the host records it.
+    - `destroy` only removes a network whose owner is this project (in addition to today's "still in use" check).
+    - Unlabelled objects (created before M6.8) show as `owner unknown` and are never refused or removed on that basis alone; they get the label when `reload` recreates them, the same migration style as the pre-M0.8 domain names.
+    - 🔬 Check on .71: that `<metadata>` with a custom namespace survives `net-define`/`net-start` and `virsh define` round trips on the testbed's libvirt (domain metadata is long-standing; confirm the network side).
+  - **Relation to other items:** gives M2.2 its orphan detection (a vmherd domain whose project directory is gone), and is the base `Herd.lock` (M6.1) needs, because a committed lockfile makes copying and cloning projects the normal workflow.
+  - **Done when:** unit tests cover the metadata in domain and network XML (golden files), owner parsing, and the conflict checks (same network name, overlapping subnet, same static IP, unlabelled object); on .71 a copied project's `up` is refused before anything is created and names the owner, a moved project's `status` points to the old directory, `status --all` lists the VMs of two projects with their directories, and an unlabelled pre-M6.8 VM keeps working.
 
 - [ ] **M6.1 — `Herd.lock`: record the exact image every project uses** · High
   - **Files:** new `internal/lockfile/`, `internal/image/registry.go` (`Entry`), `internal/image/download.go`, `cmd/vmherd/up.go` + `reload.go` (`resolveAndCacheImages`), `cmd/vmherd/pull.go`, new `cmd/vmherd/update_images.go`, README, CLAUDE.md
@@ -664,7 +685,7 @@ Direction (decided 2026-11-11): vmherd manages a project's whole development env
 **Not building:** a provisioning language of its own, a Dev Container implementation, a template registry or marketplace, VM cloning, `depends_on` start ordering (playbook order covers it), multi-cloud or remote hosts, a GUI.
 
 **Order across milestones** (reliability before breadth):
-M1.19 → M6.4 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
+M1.19 → M6.4 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
 M5.2 (addresses that survive a rebuild) and M3.6 (a per-project `known_hosts`) come before M7 because a generated SSH config and Ansible inventory are only as good as the addresses and host keys in them.
 
 - [ ] **M7.1 — `vmherd ssh-config`: let other tools connect** · Feature
