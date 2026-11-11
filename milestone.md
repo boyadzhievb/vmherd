@@ -17,11 +17,13 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 18 | 18 |
+| M1 | Correctness of existing features | 19 | 18 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 6 | 0 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
+| M6 | Team adoption: locked images, config changes, snapshots, distro tests | 7 | 0 |
+| M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
 
 ---
 
@@ -306,6 +308,14 @@ This is a remediation plan, separate from the product roadmap milestones.
 
 Note: the default network name collision is handled under M1.2.
 
+- [ ] **M1.19 — `reload` destroys the VM before it knows the image is available** · High
+  - **Files:** `cmd/vmherd/reload.go` (`newReloadCmd`, `reloadSingleVM`, `createVM`), `cmd/vmherd/up.go` (`resolveAndCacheImages`)
+  - **Problem (found by reading the code, 2026-11-11):** `reloadSingleVM` stops the VM and removes its domain, disk and seed, and only then `createVM` resolves and downloads the image. If the image isn't cached and the download fails (vendor removed the file, no network, checksum mismatch, image missing from `images:`), the old VM is already gone and nothing replaces it. `up` does this in the right order: `resolveAndCacheImages` runs before any VM is created.
+  - **How Vagrant does it:** `vagrant reload` keeps the disk, so the question doesn't arise; `vagrant destroy && vagrant up` has the same exposure when the box is no longer downloadable.
+  - **Fix:** In `reload`, call `resolveAndCacheImages` for all VMs to reload before the first one is touched, and stop with the download error if any image is unavailable ("nothing was changed"). Pass the resolved image into `createVM` instead of resolving again there, so `up` and `reload` share one path. Check the other things `createVM` can refuse before the destroy as well (share identity, bridge exists).
+  - **Rule for later items:** never remove something that exists (a VM, a disk, a cached image, a lock entry) until its replacement is on disk and verified. M6.1 and M6.2 apply it to `update-images`.
+  - **Done when:** a unit test shows the destroy step is not reached when the image can't be resolved or cached; on .71, `reload` of a running VM with its `images:` URL changed to a 404 exits 1 and the VM is still running with its disk intact.
+
 ---
 
 ## M2 — Structure: state, abstractions, deduplication
@@ -406,6 +416,7 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** The checksum file comes from the same host as the image (by scraping the directory listing), so verification only detects corruption, not tampering. CLAUDE.md promises GPG verification, but there is none.
   - **Fix:** Embed vendor signing keys and verify `SHA256SUMS.gpg` (Ubuntu), the clearsigned `CHECKSUM` (Fedora) and `SHA512SUMS.sign` (Debian) with an OpenPGP library. Also support a pinned `sha256:` per image in the Herdfile (`images: { ubuntu:noble: { url: …, sha256: … } }`), and have `vmherd pull` print the hash so users can pin it.
   - **Done when:** A tampered checksum file fails verification in tests, and a pinned hash overrides discovery.
+  - **Note (2026-11-11):** pinning is planned as a lockfile (`Herd.lock`, M6.1) instead of a `sha256:` key in the Herdfile, and comes first; vendor signatures stay here.
 
 - [ ] **M3.4 — 🧭 Decide the image registry model** · Med
   - **Problem:** CLAUDE.md says "built-in registry, no user URLs"; the code requires an `images:` map of URLs in the Herdfile.
@@ -417,6 +428,7 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** `…/noble/current/…` changes over time, but the cache is keyed only by distro, codename and filename, so it never refreshes. An image is verified once and then trusted forever.
   - **Fix:** Store the verified hash and the source checksum file's ETag or Last-Modified next to the image. Have `pull` re-check, and have `up` re-hash only on demand (`--verify`).
   - **Done when:** `vmherd pull` fetches a new image after the vendor updates `current/`.
+  - **Note (2026-11-11):** planned in detail as M6.2. A refresh must never overwrite a cached file in place: VM disks use the cached image as their qcow2 backing file (`createDisk`, `internal/vm/vm.go`), so replacing it corrupts every VM built from it.
 
 ### Phase 3B — SSH trust
 
@@ -550,3 +562,170 @@ Note: the default network name collision is handled under M1.2.
   - **Decision (2026-11-10):** the user installs and starts the NFS server (vmherd checks it is running and otherwise refuses, naming the package/command); vmherd writes one file per project, `/etc/exports.d/vmherd-<project>.exports`, with sudo and runs `exportfs -ra`; `destroy` removes it. Nothing else in `/etc/exports` is touched.
   - **Design (to refine):** NFSv4 only (port 2049, no rpcbind); export to the project subnet only; `rw,all_squash,anonuid=<host uid>,anongid=<host gid>,no_subtree_check` so every guest write (root's too) becomes the host user — same guarantee as 9p `squash`. To check on the testbed: NFS client in each cloud image (Ubuntu may lack `nfs-common` — air-gap concern), host firewall (ufw/firewalld) on the libvirt bridge.
   - **Done when:** an alma VM with `type: nfs` mounts the project read-write with host-user ownership; `destroy` removes the exports file; a missing NFS server gives an actionable error.
+
+---
+
+## M6 — Team adoption (plan of 2026-11-11)
+
+Source: an outside adoption checklist (image updates, reproducibility, snapshots, provisioning, shared folders, networking, lifecycle, security, testing, maintenance) checked against the code on 2026-11-11. Gaps already tracked elsewhere keep their items: stable addresses (M5.2), host-key pinning (M3.6), vendor signatures (M3.3), release gating (M3.9), orphaned VMs (M2.2). M6 holds the gaps that had no item, plus the detailed plan for image pinning.
+
+**Order:** see "Order across milestones" under M7 — M6.4 (distro tests) goes first because it protects every later item; M6.6 waits for M2.1.
+
+### Phase 6A — Reproducible images
+
+- [ ] **M6.1 — `Herd.lock`: record the exact image every project uses** · High
+  - **Files:** new `internal/lockfile/`, `internal/image/registry.go` (`Entry`), `internal/image/download.go`, `cmd/vmherd/up.go` + `reload.go` (`resolveAndCacheImages`), `cmd/vmherd/pull.go`, new `cmd/vmherd/update_images.go`, README, CLAUDE.md
+  - **Problem:** `images:` is a name → URL map. Nothing records which build a project uses, so two developers get different "ubuntu:noble" images depending on when each pulled, and the checksum is discovered from the same host as the image.
+  - **How Vagrant does it:** `config.vm.box_version` pins a box version from the registry; without it every machine takes the newest box it happens to have. There is no lockfile.
+  - **Design (decided 2026-11-11: a lockfile, not a `sha256:` key in the Herdfile):**
+    - The Herdfile keeps its `images:` map unchanged. `Herd.lock` sits next to it, is meant to be committed, and is YAML with a `version: 1` key and, per image name: the resolved `url`, `sha256`, `architecture`, and the date it was locked. vmherd writes it; people don't edit it by hand. It is written atomically (temp file + rename) with sorted keys, so diffs are stable.
+    - `up`/`reload`/`pull` with no lock entry for an image: discover the checksum as today, download, verify, then add the entry and say so (`locked ubuntu:noble to sha256 1a2b…`).
+    - With a lock entry: discovery is skipped. The image is looked up by hash in the cache (M6.2) or downloaded from the locked `url` and checked against the locked hash. A mismatch stops before any VM is created, names both hashes, and says the vendor has replaced the file: run `vmherd update-images <image>` to move to the new build.
+    - `vmherd update-images [image...]` is the only command that changes an existing entry. It downloads and verifies the new build first and rewrites the lock entry only after the file is in the cache; on any failure the old entry and the old cached file stay as they were (M1.19 rule). It prints old → new hash per image and reminds the user that existing VMs keep their old image until `reload`.
+    - A Herdfile `images:` URL that differs from the locked `url` is reported as a problem with the same hint (the lock is stale), not silently re-resolved.
+    - Where a vendor publishes a dated copy of the same build (Ubuntu: `…/noble/<YYYYMMDD>/…` next to `current/`), the lock records the dated URL, so the locked build stays downloadable after `current/` moves on.
+    - 🔬 Check before promising "the same image over time": how long each vendor keeps dated builds (Ubuntu, Debian; Fedora, Rocky and Alma file names are already fixed per release). If old builds are pruned, a developer with an empty cache cannot fetch a locked build. The error must say exactly that and offer the two ways out: `update-images`, or copy the file from a teammate's `~/.vmherd/images/`. A team mirror setting is a follow-up, not part of this item.
+  - **Done when:** tests cover creating the lock, using it (hit, mismatch, stale URL), `update-images`, and stable output ordering; on .71 a second checkout of the same project with the committed `Herd.lock` builds its VM from the same hash, and a tampered lock hash stops `up` before any VM is created.
+
+- [ ] **M6.2 — Store images by content, refresh only on request** · Med
+  - **Depends on:** M6.1. Replaces the fix text of M3.5.
+  - **Files:** `internal/image/download.go` (`CachedPath`, `EnsureCached`), `cmd/vmherd/pull.go`, `cmd/vmherd/list_images.go`
+  - **Problem:** The cache file is named `<distro>-<codename>-<filename>`, so two builds of the same image can't coexist, and a refresh in place would break the backing file of existing VM disks.
+  - **Design:**
+    - New downloads are stored as `<distro>-<codename>-<first 16 hex of sha256>-<filename>` with a small JSON record next to them (full hash, source URL, download time).
+    - Lookup is by the hash in `Herd.lock`. A file cached under the old name is hashed once and adopted (renamed) when its hash matches; otherwise it is left alone for the VMs that still use it.
+    - Only `vmherd update-images` fetches a newer build. `up` never refreshes on its own (idempotent, air-gap safe) and prints which build a new VM is created from (hash prefix and lock date).
+    - Old files are never deleted automatically, and never before the new build is downloaded and verified. `list-images` shows each cached build and whether a VM disk still uses it (`qemu-img info --backing-chain` on the project's disks); removing unused builds is a follow-up.
+  - **Done when:** after `update-images`, the cache holds both builds, existing VMs still boot from the first, and a new VM uses the second; unit tests cover lookup by hash and adoption of an old-name file.
+
+### Phase 6B — Measure and test
+
+- [ ] **M6.3 — 🔬 Benchmark 9p for small-file workloads** · Med
+  - **Files:** new `test/benchmark/shares/` (script + Herdfile), results written into this item; `internal/cloudinit/cloudinit.go` (`sharedMountOptions`) only if the numbers justify it
+  - **Problem:** Shares mount with `trans=virtio,version=9p2000.L,noatime,nofail` and kernel defaults for everything else. Nobody has measured it; 9p is known to be slow with many small files (`node_modules`).
+  - **Method (on .71, ubuntu:noble guest, 3 runs each, report the median):**
+    - Workloads: `npm ci` of a mid-size project, `git status` on a large checkout, `find` + `stat` over the tree, a build that reads many files.
+    - Configurations: guest disk (baseline), 9p as shipped, 9p with larger `msize` (262144, 524288, and larger if the guest kernel accepts it), 9p with `cache=` modes, a hand-made NFSv4 mount, and a hand-run unprivileged `virtiofsd` for reference.
+    - Correctness check for every `cache=` mode: a file edited on the host must show its new content in the guest right away. A mode that fails this is out, whatever its speed.
+  - **🧭 Decision after the numbers:** tune the default mount options, and/or raise the priority of M5.3/M5.4, and/or reopen virtiofs with a user-run `virtiofsd` (M0.10 notes). The README gets a short "share performance" section with the measured numbers either way.
+  - **Done when:** the table of results is in this item, the decision is recorded, and any option change is covered by the existing cloud-init mount tests.
+
+- [ ] **M6.4 — Integration tests across distros, through the CLI** · High
+  - **Files:** new `test/e2e/` (build tag `integration`), `.github/workflows/integration.yml`, `test/acceptance/*`
+  - **Problem:** The one lifecycle test calls internal packages with `ubuntu:noble`. M1.12–M1.18 were all distro-specific or in `cmd/`, and all found by hand. The acceptance Herdfiles are not run by CI.
+  - **Design:**
+    - The test builds the binary and drives it like a user, in a temp project with its own `VMHERD_STATE_DIR` and subnet: `up` → `status` → `ssh -- true` → `provision` → `restart` → `down` → `up` → `destroy`, then asserts no domain, disk, seed or network is left.
+    - Table of images: the four built-in ones plus `debian:trixie`, `rocky:9`, `almalinux:9` and Arch (URLs in the test's Herdfile). Per image, the expected share result: mounted, or the "no 9p support" message on EL.
+    - Per image also: a failing shell step makes `up` exit 1 and names the step (M1.16); a DHCP VM gets an address; a static-IP VM is reachable (M1.14).
+    - CI: pull requests run `ubuntu:noble` only; pushes to `main` and a nightly schedule run the full table, one distro at a time unless the runner has room for more (check its RAM before choosing `-parallel`). Raise the 15-minute timeout to fit. Images are cached on the runner; the nightly run is also the early warning for vendor URL changes (M1.12).
+    - Keep the fork-PR guard from M0.3.
+  - **Done when:** the full table is green on the self-hosted runner, a deliberately broken distro case turns the run red, and the old `TestFullVMLifecycle` is removed or reduced to what the e2e test doesn't cover.
+
+### Phase 6C — Configuration changes
+
+- [ ] **M6.5 — Tell the user when the Herdfile no longer matches an existing VM** · High
+  - **Files:** new `cmd/vmherd/config_drift.go`, `cmd/vmherd/up.go` (`bringUpVMs`), `cmd/vmherd/status.go`, `internal/vm` (read cpus/memory from `virsh dumpxml`, disk size from `qemu-img info`)
+  - **Problem:** `up` prints "already running" and ignores edits to `cpus`, `memory`, `disk` and everything else. The user believes the change was applied.
+  - **How Vagrant does it:** `vagrant reload` restarts the VM and applies the new provider settings (CPUs, memory) while keeping the disk. vmherd's `reload` destroys the disk and rebuilds — the same word for a much more destructive action.
+  - **Design (step 1, no state file needed):** for each existing VM, compare `cpus`, `memory` and `disk` in the Herdfile with the live domain. `up` and `status` print one line per difference (`ctrl: Herdfile says memory 4096, the VM has 2048`) and the command that applies it. `up` still exits 0; nothing changes on its own.
+  - **🧭 Decision:** how changes get applied without losing the disk. Recommendation: `vmherd restart` applies `cpus` and `memory` (`virsh setvcpus/setmaxmem --config`) and grows the disk (`qemu-img resize`; cloud-init's growpart extends the filesystem on boot); shrinking the disk is refused. `reload` stays the rebuild, and its help text and confirmation say the disk is lost. Renaming `reload` to match Vagrant is a separate question for the maintainer.
+  - **Done when:** unit tests cover the comparison (same, each field different, disk smaller); on .71 editing `memory` and running `up` prints the difference, and the agreed command applies it with the disk contents intact.
+
+- [ ] **M6.6 — Detect changes that need a rebuild** · Med
+  - **Depends on:** M2.1 (`state.json`), M6.2 (image hash), M6.5
+  - **Files:** `internal/state/` (from M2.1), `cmd/vmherd/config_drift.go`
+  - **Problem:** Image, first-boot provisioning steps, shared folders, static IP and SSH user are fixed when the VM is created. A change to any of them can't be seen from the live domain.
+  - **Design:** M2.1's per-VM record also stores the applied values: image name and hash, share list, network settings, SSH user, and a hash of the provisioning steps. `up`/`status` compare and say which changes need `vmherd reload <vm>` (disk lost) and which only need `vmherd provision <vm>` (provisioning steps). VMs created before the record exists report "created before change tracking" once, not a false difference.
+  - **Done when:** changing the image, a share and a provisioning step each produce the right hint; an unchanged Herdfile produces none; a pre-record VM produces the one-time note.
+
+### Phase 6D — Snapshots
+
+- [ ] **M6.7 — `vmherd snapshot save|restore|list|delete`** · Feature
+  - **Files:** new `cmd/vmherd/snapshot.go`, `internal/vm/snapshot.go`, `internal/libvirt/virsh.go`, `cmd/vmherd/destroy.go`, `cmd/vmherd/reload.go`, README, CLAUDE.md (CLI list)
+  - **Why:** Roll a VM back after a failed experiment or provisioning run without a full rebuild. Vagrant equivalent: `vagrant snapshot save/restore/list/delete`.
+  - **Design (to refine before building — offer a review agent):**
+    - Internal qcow2 snapshots through libvirt (`virsh snapshot-create-as`, `snapshot-revert`, `snapshot-list`, `snapshot-delete`). They live inside the VM's own disk, so there are no extra files to track and the backing image is untouched.
+    - First version snapshots the disk of a stopped VM: `save` on a running VM shuts it down gracefully, takes the snapshot and starts it again (and says so first). `restore` stops the VM, reverts and starts it.
+    - 🔬 Check on .71 before settling this: whether a live snapshot with memory works at all for a VM with a mounted 9p share (QEMU blocks migration-style state saves for mounted VirtFS exports). If it works for VMs without shares, `--live` can come later.
+    - `destroy` and `reload` must remove snapshot metadata (`virsh undefine --snapshots-metadata` or delete each snapshot first); otherwise `undefine` fails on a VM that has snapshots. `reload` says how many snapshots it is about to remove.
+    - `save` states what is not included: files in shared folders live on the host and are not rolled back.
+    - `vmherd snapshot save <name> [vm...]`: with no VM named, every VM in the project gets a snapshot of that name, and `restore <name>` brings them all back together. The VMs are stopped first, so the set is consistent. A VM that lacks the named snapshot is reported and nothing is restored.
+    - Snapshots are local rollback points, not backups; the help text says so.
+    - Snapshot names follow the VM-name rules; `list` output is sorted and stable. `status` shows the snapshot count.
+  - **Done when:** on .71, a file written after `save` is gone after `restore` on ubuntu and rocky; `destroy` works on a VM with snapshots and leaves nothing behind; unit tests cover name validation and the virsh command building; the e2e test (M6.4) includes a save/restore round trip.
+
+---
+
+## M7 — Environment integrations (plan of 2026-11-11)
+
+Direction (decided 2026-11-11): vmherd manages a project's whole development environment — its machines and their network — and connects it to tools developers already use. libvirt/KVM runs the machines, cloud-init bootstraps them, Ansible configures them, Dev Containers provide the developer tooling; vmherd creates the environment and hands each tool what it needs. vmherd does not reimplement any of them.
+
+**Not building:** a provisioning language of its own, a Dev Container implementation, a template registry or marketplace, VM cloning, `depends_on` start ordering (playbook order covers it), multi-cloud or remote hosts, a GUI.
+
+**Order across milestones** (reliability before breadth):
+M1.19 → M6.4 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
+M5.2 (addresses that survive a rebuild) and M3.6 (a per-project `known_hosts`) come before M7 because a generated SSH config and Ansible inventory are only as good as the addresses and host keys in them.
+
+- [ ] **M7.1 — `vmherd ssh-config`: let other tools connect** · Feature
+  - **Files:** new `cmd/vmherd/ssh_config.go`, `internal/ssh/connect.go` (share the option list with `sshBaseArgs`), README, CLAUDE.md (CLI list)
+  - **Why:** VS Code Remote SSH, plain `ssh`/`rsync`/`scp`, Ansible and Docker's `ssh://` contexts all read OpenSSH config. Today the only way in is `vmherd ssh`. Vagrant equivalent: `vagrant ssh-config`.
+  - **Design:**
+    - `vmherd ssh-config [name...]` prints one `Host` block per running VM: `HostName` (current address, DHCP included), `User`, `IdentityFile`, `IdentitiesOnly yes`, and the same host-key options `vmherd ssh` uses — the project `known_hosts` once M3.6 is done.
+    - The host alias is the VM name. `--suffix` adds `.<project>` for people who keep several projects in one SSH config. Output is sorted by VM name.
+    - A stopped or address-less VM is skipped with a note on stderr, so stdout stays valid config.
+    - README shows the two uses: `vmherd ssh-config > ~/.ssh/config.d/<project>` with an `Include`, and VS Code Remote SSH.
+  - **Done when:** `ssh -F <(vmherd ssh-config) ctrl true` works on .71 for a static and a DHCP VM; unit tests cover the rendered block and the skipped-VM case.
+
+- [ ] **M7.2 — 🧭 VMs reach each other by name** · Feature
+  - **Depends on:** M5.2
+  - **Files:** `internal/cloudinit/cloudinit.go`, `cmd/vmherd/up.go`, `cmd/vmherd/provision.go`
+  - **Problem:** Each guest knows its own hostname, but `ping database` from `app-1` fails. Multi-VM projects hard-code IPs in scripts and playbooks.
+  - **How Vagrant does it:** it doesn't; the vagrant-hostmanager plugin writes `/etc/hosts` in every guest.
+  - **Options:** (a) a vmherd-managed block in each guest's `/etc/hosts`, written at first boot and refreshed over SSH by `up` when the set of VMs or addresses changes; (b) names served by the project network's dnsmasq. (b) needs guests to use libvirt's DNS, which conflicts with host-derived DNS (`use-dns: false`, air-gap rule) and doesn't exist in bridge mode.
+  - **Recommendation:** (a). It works in NAT and bridge mode and offline. The block is fenced with begin/end marker lines and only that block is rewritten. VMs without a known address (bridge-mode DHCP) are left out and `up` says so.
+  - **Done when:** on .71 in a two-VM project each VM pings the other by name on ubuntu and rocky; adding a third VM and running `up` makes it resolvable from the first two; `destroy` of one VM removes its entry on the next `up`.
+
+- [ ] **M7.3 — `groups:` per VM and `vmherd inventory`** · Feature
+  - **Depends on:** M7.1 (shared connection details)
+  - **Files:** `internal/config/config.go`, `fields.go`, new `cmd/vmherd/inventory.go`, new `internal/inventory/`, README
+  - **Why:** Users who configure VMs with Ansible maintain an inventory by hand that repeats the Herdfile. Vagrant's Ansible provisioner generates one; vmherd should too, without making Ansible a dependency.
+  - **Design:**
+    - New optional VM key `groups: [application, database]` (names validated as Ansible group names). Called `groups`, not `role`: in Ansible a "role" is a different thing (a directory of tasks), and the word would mislead exactly the users this is for.
+    - `vmherd inventory` prints an Ansible YAML inventory: every VM under `all`, each group with its hosts, and per host `ansible_host`, `ansible_user`, `ansible_ssh_private_key_file` and the host-key arguments. `--format json` prints Ansible's dynamic-inventory JSON (`_meta.hostvars`), so a two-line wrapper script works as `-i`.
+    - Output is sorted and stable. A VM without an address is left out with a note on stderr.
+    - vmherd never writes the inventory into the project on its own; the user redirects it or lets M7.4 pass it.
+  - **Done when:** `ansible -i <(vmherd inventory) all -m ping` succeeds on .71 for a mixed ubuntu/rocky project; `ansible-inventory --list` accepts both formats; unit tests cover grouping, ordering and the missing-address case.
+
+- [ ] **M7.4 — 🧭 Run the project's playbook from `up` and `provision`** · Feature
+  - **Depends on:** M7.3, M3.6
+  - **Files:** `internal/config/config.go`, `fields.go`, `cmd/vmherd/up.go`, `cmd/vmherd/provision.go`, new `cmd/vmherd/ansible_run.go`, README
+  - **Why:** cloud-init gets a VM reachable; shell steps become awkward once several machines need coordinated configuration.
+  - **How Vagrant does it:** an `ansible` provisioner per machine with a generated inventory. A playbook that spans machines then has to be attached to the last machine with `limit: "all"` — a well-known workaround.
+  - **Recommendation:** a project-level section, not a per-VM step, because a playbook targets the whole inventory:
+    ```yaml
+    ansible:
+      playbook: ansible/site.yml
+    ```
+    `up` runs it once after every VM has finished first-boot provisioning, and only when this run created at least one VM (same rule as shell steps). `vmherd provision` reruns it; naming VMs passes `--limit`. vmherd calls the installed `ansible-playbook` with the generated inventory in a temp file and streams its output; the exit code decides success.
+  - **Rules:** Ansible stays optional — it is only looked for when the section exists, and a missing `ansible-playbook` gives an install hint. The playbook path must be inside the project. vmherd does not install collections; if `requirements.yml` sits next to the playbook and `up` fails, the error mentions `ansible-galaxy install -r`.
+  - **To decide:** extra arguments (`args:` list vs. a passthrough `vmherd ansible -- …`), and whether a failed playbook marks the VMs as failed in `up`'s summary or only the project.
+  - **Done when:** on .71 the `ansible-lab` layout (one controller-less project, three nodes) is configured by `up`; a failing task makes `up` exit 1 and name the playbook; `vmherd provision db` limits the run; a project without the section never looks for Ansible.
+
+- [ ] **M7.5 — `vmherd init --template`** · Feature
+  - **Depends on:** M6.4 (every template is run by the e2e test), M7.4 for `ansible-lab`
+  - **Files:** new `internal/template/` (`embed.FS`), `cmd/vmherd/init.go`, `test/e2e/`, README
+  - **Why:** The first five minutes. A working multi-VM project teaches the Herdfile faster than the field tables.
+  - **Design:**
+    - `vmherd init --template <name>` writes ordinary, editable files (Herdfile, scripts, `ansible/`, a short README) and never overwrites an existing file — it lists the conflicts and stops. `vmherd init --list-templates` shows names and one-line descriptions. Plain `init` stays as it is (`single-vm`).
+    - Network name and subnet are filled in the same way `init` does today.
+    - First set: `single-vm`, `web-db` (app VM + database VM, shell provisioning), `ansible-lab` (three nodes in two groups, a small playbook). More only on demand; each one is a standing maintenance cost.
+    - Templates from a Git URL and a `k8s-lab` template are out of scope here.
+  - **Done when:** each template comes up green in the e2e test on the runner, and `init --template` into a non-empty project refuses without writing anything.
+
+- [ ] **M7.6 — 🔬 A Dev Container workflow that is fast enough** · Feature
+  - **Depends on:** M7.1, M6.3 (share numbers), M5.3 (rsync shares) if the numbers call for it
+  - **Files:** README (new section), `internal/template/` (`devcontainer` template), no Dev Container code in vmherd
+  - **What:** A workspace VM runs Docker or Podman; the project's own `.devcontainer/` is used unchanged. The developer connects with VS Code Remote SSH (via `ssh-config`) and reopens the folder in its container, which can reach the project's other VMs.
+  - **Problem to solve first:** a dev container that bind-mounts `/vagrant` reads every file through 9p. Decide from the M6.3 numbers where the working tree lives: on the 9p share if tuned 9p is good enough, otherwise on the VM's own disk (cloned in the guest, or pushed with an rsync share).
+  - **Verify on .71:** in the workspace VM, `devcontainer up` (the reference CLI) builds and starts a sample project's container; from inside it the database VM is reachable by name (M7.2); time `npm ci` in the container for each working-tree location.
+  - **Done when:** the README documents the workflow with the measured choice, and the `devcontainer` template reproduces it from `init` to a running container on the runner.

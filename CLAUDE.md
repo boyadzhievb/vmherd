@@ -6,6 +6,8 @@
 
 **Why it exists**: Vagrant depends on HCP Vagrant Cloud for box hosting (going EOL Nov 2026). Cloud images from distro vendors are GPG-signed, SHA256-verified, and the same images used by AWS/GCP/Azure. No third-party registry needed.
 
+**Direction (decided 2026-11-11)**: vmherd manages a project's whole development environment — its machines and their network — not just single VMs, and connects it to tools developers already use. libvirt/KVM runs the machines, cloud-init bootstraps them, Ansible configures them, Dev Containers provide developer tooling; vmherd creates the environment and hands each tool what it needs (SSH config, inventory). It does not reimplement them. Not building: an own provisioning language, a Dev Container implementation, a template registry, VM cloning, multi-cloud or remote hosts, a GUI. Planned work is in `milestone.md` (M6 reproducibility and lifecycle, M7 integrations); nothing in M6/M7 exists in the code until its item is ticked.
+
 **Language**: Go. **License**: AGPL-3.0.
 
 ---
