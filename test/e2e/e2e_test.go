@@ -222,6 +222,15 @@ func newE2EProject(t *testing.T, distro distroCase, subnetOctet int) e2eProject 
 	if err := os.WriteFile(filepath.Join(project.directory, "Herdfile"), []byte(herdfile), 0o644); err != nil {
 		t.Fatalf("writing Herdfile: %v", err)
 	}
+	cleanUpNowAndOnFailure(t, project)
+	return project
+}
+
+// cleanUpNowAndOnFailure removes the project's leftovers of an earlier,
+// aborted run, and registers a cleanup that destroys the project and removes
+// any leftovers if the test fails.
+func cleanUpNowAndOnFailure(t *testing.T, project e2eProject) {
+	t.Helper()
 	removeLeftovers(t, project)
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -231,7 +240,6 @@ func newE2EProject(t *testing.T, distro distroCase, subnetOctet int) e2eProject 
 			removeLeftovers(t, project)
 		}
 	})
-	return project
 }
 
 // runDistroLifecycle is the scenario for one distro; each phase is a helper

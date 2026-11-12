@@ -677,6 +677,9 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
 - [ ] **M6.9 — Run the Terramino acceptance scenarios in CI** · Med
   - **Depends on:** M6.4 (e2e harness)
   - **OpenSpec change:** `openspec/changes/terramino-acceptance-ci/` (proposal, spec delta with test names, design, tasks)
+  - **Checklist (2026-11-12):**
+    - 1.1 `go test ./test/acceptance/` on the unchanged Herdfiles: `TestScenarioHerdfilesLoad` passes; `TestScenarioNetworksAreDistinct` fails with "terramino-single uses 192.168.122.0/24", the same for multi, "same network name vmherd-terramino" and "same subnet 192.168.122.0/24".
+    - 1.3 `TestAcceptanceScenarios` on .71 with the unchanged files: both subtests fail at `up` (exit 1) with "subnet 192.168.122.0/24 overlaps with existing libvirt network "default" … 192.168.150.0/24 is free" (.71's `default` network is defined but inactive). Nothing was created.
   - **Files:** `test/acceptance/terramino-single/`, `test/acceptance/terramino-multi/`, `test/e2e/` (new scenario test), `.github/workflows/integration.yml`
   - **Problem:** The two Terramino projects (ported from HashiCorp's learn-vagrant-get-started tutorial) are vmherd's only user-level acceptance scenarios, but their steps (`curl` the forwarded ports, `provision`, `down`/`up`) are comments in the Herdfiles and nothing runs them. The M6.4 e2e test checks vmherd's own behaviour per distro; it doesn't cover port forwarding, `type: file` steps, extra shares or a real multi-VM application. Both Herdfiles also use 192.168.122.x, libvirt's stock `default` subnet (the M1.2 collision), and fixed host ports 8080/8081/6379 that may be taken on the runner.
   - **Design:**

@@ -2,18 +2,18 @@
 
 ## 1. Failing tests first
 
-- [ ] 1.1 Add `test/acceptance/acceptance_test.go` (no build tag) with `TestScenarioHerdfilesLoad` and `TestScenarioNetworksAreDistinct`. Run `go test ./test/acceptance/` against the unchanged Herdfiles and record the failure in the M6.9 checklist: expect "same network name vmherd-terramino" and "uses 192.168.122.0/24".
-- [ ] 1.2 Add `test/e2e/scenarios_test.go` (tag `integration`):
+- [x] 1.1 Add `test/acceptance/acceptance_test.go` (no build tag) with `TestScenarioHerdfilesLoad` and `TestScenarioNetworksAreDistinct`. Run `go test ./test/acceptance/` against the unchanged Herdfiles and record the failure in the M6.9 checklist: expect "same network name vmherd-terramino" and "uses 192.168.122.0/24".
+- [x] 1.2 Add `test/e2e/scenarios_test.go` (tag `integration`):
   - the `VMHERD_E2E_SCENARIOS` gate and `VMHERD_E2E_SCENARIO_DIR` override;
   - the scenario table and `newScenarioProject`;
   - the phases `checkHostPortsFree`, `checkForwardedPorts`, `checkNamesResolveAcrossVMs`, `checkProvisionRerun`, `checkDownUpKeepsData`, and `checkDestroyLeavesNothing` (reused).
 
   Move any helper both tests need into a shared file without changing its behaviour. Verify: `go vet -tags integration ./test/e2e/` is clean, `golangci-lint run --build-tags integration ./test/e2e/` reports nothing new, and `go test -tags integration -run TestAcceptanceScenarios ./test/e2e/` without the variable prints the skip message.
-- [ ] 1.3 Cross-compile `e2e.test` and run `TestAcceptanceScenarios` on .71 against the unchanged scenario files (`VMHERD_E2E_SCENARIOS=1`, scenario dir copied). Record how each subtest fails (expected: subnet overlap with libvirt's `default` network) in the M6.9 checklist.
+- [x] 1.3 Cross-compile `e2e.test` and run `TestAcceptanceScenarios` on .71 against the unchanged scenario files (`VMHERD_E2E_SCENARIOS=1`, scenario dir copied). Record how each subtest fails (expected: subnet overlap with libvirt's `default` network) in the M6.9 checklist.
 
 ## 2. Scenario files
 
-- [ ] 2.1 Give single network `vmherd-terramino-single` with 192.168.240.0/24 (VM .10) and multi `vmherd-terramino-multi` with 192.168.241.0/24 (VMs .10–.12). Verify: `go test ./test/acceptance/` passes.
+- [x] 2.1 Give single network `vmherd-terramino-single` with 192.168.240.0/24 (VM .10) and multi `vmherd-terramino-multi` with 192.168.241.0/24 (VMs .10–.12). Verify: `go test ./test/acceptance/` passes.
 - [ ] 2.2 Rerun the scenarios on .71 and record the next failures in the M6.9 checklist (expected for multi: provision rerun fails on a busy port or gpg prompt, the app is gone after down + up, possibly git's dubious-ownership check at first boot). Anything that is a vmherd bug rather than a scenario-file bug becomes its own milestone item with a failing test; this change does not work around it.
 - [ ] 2.3 Make multi rerunnable:
   - `docker rm -f <name>` before `docker run --name <name> --restart unless-stopped`;

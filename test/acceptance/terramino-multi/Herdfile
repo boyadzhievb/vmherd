@@ -23,7 +23,7 @@ vms:
     memory: 1024
     disk: 10G
     network:
-      ip: 192.168.122.10
+      ip: 192.168.241.10
     ports:
       - host: 6379
         guest: 6379
@@ -48,7 +48,7 @@ vms:
     memory: 1024
     disk: 10G
     network:
-      ip: 192.168.122.11
+      ip: 192.168.241.11
     ports:
       - host: 8080
         guest: 8080
@@ -84,7 +84,7 @@ vms:
     memory: 1024
     disk: 10G
     network:
-      ip: 192.168.122.12
+      ip: 192.168.241.12
     ports:
       - host: 8081
         guest: 8081
@@ -118,8 +118,8 @@ vms:
             frontend
 
 network:
-  name: vmherd-terramino
-  subnet: 192.168.122.0/24
+  name: vmherd-terramino-multi
+  subnet: 192.168.241.0/24
   dns: auto
 
 ssh:

@@ -21,7 +21,7 @@ vms:
     memory: 2048
     disk: 20G
     network:
-      ip: 192.168.122.10
+      ip: 192.168.240.10
     ports:
       - host: 8080
         guest: 8080
@@ -43,8 +43,8 @@ vms:
           docker compose up -d
 
 network:
-  name: vmherd-terramino
-  subnet: 192.168.122.0/24
+  name: vmherd-terramino-single
+  subnet: 192.168.240.0/24
   dns: auto
 
 ssh:
