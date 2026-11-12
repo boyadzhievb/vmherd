@@ -8,6 +8,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 - Work **one item at a time**, in order. Each item becomes one commit (or one PR).
 - Before committing: `gofmt -l .` is empty, `go vet ./...`, `go test ./...` and `golangci-lint run` all pass.
 - Tick the checkbox `[x]` in the same commit that fixes the item.
+- **Test first** (M4.7): a bug fix starts with a test that fails for the reported reason (unit test where possible, otherwise an e2e case in `test/e2e/`), and the result note says how it failed before the fix. A feature item's "Done when" names its tests before work starts; they are written before the code. Testbed checks cover what tests can't (other distros, real hardware) but don't replace a test. Where `cmd/` code can't be tested yet, the item says so and points at M2.3.
 - 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.49 before fixing. If it doesn't reproduce, close the item with a note.
 - 🧭 **Decision** = needs a product decision from the maintainer before any code changes.
 - Severity: **Crit** / **High** / **Med** / **Low**.
@@ -542,6 +543,7 @@ Note: the default network name collision is handled under M1.2.
     - Testbed checks stay, for what tests can't show (other distros, real hardware), but no longer replace a test.
     - Where `cmd/` code can't be tested yet, the item says so and points at M2.3, instead of skipping the test silently.
   - **Done when:** CLAUDE.md's Development Workflow and "How to use this file" carry the rule, and the next bug fix after it follows it.
+  - **Status (2026-11-12):** The rule is in CLAUDE.md (Development Workflow, item 7) and in "How to use this file". The checkbox gets ticked when the next bug fix follows the rule; its result note names this item.
 
 ---
 

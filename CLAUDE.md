@@ -213,6 +213,11 @@ reference/          # CCattler's original bash script (design reference)
 4. No hardcoded DNS servers — always derive from host.
 5. Error messages shown to user explicitly, never swallowed.
 6. Explain approach before implementing. No opportunistic changes.
+7. **Write the test first** (M4.7, 2026-11-12):
+   - A bug fix starts with a test that fails for the reported reason: a unit test where the code allows it, otherwise an e2e case in `test/e2e/`. Run it before the fix and record how it failed in the commit message or the item's result note.
+   - A feature item's "Done when" names its tests before implementation starts. Write those tests first, then the code.
+   - Testbed checks stay for what tests can't show (other distros, real hardware), but they don't replace a test.
+   - If `cmd/` code can't be tested yet (it calls `virsh`, `sudo` or `ssh` directly), say so in the item and point at M2.3. Never skip the test silently.
 
 ---
 
