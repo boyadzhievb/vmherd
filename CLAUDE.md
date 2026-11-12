@@ -192,6 +192,10 @@ internal/
   cloudinit/        # cloud-init file generation
   ssh/              # SSH key generation and connection
 reference/          # CCattler's original bash script (design reference)
+openspec/
+  specs/            # current behaviour per capability, each scenario names its test
+  changes/          # proposed changes (proposal, spec delta, design, tasks); archive/ when done
+  config.yaml       # rules for every OpenSpec artifact (test-first, Vagrant comparison)
 ```
 
 ---
@@ -218,6 +222,7 @@ reference/          # CCattler's original bash script (design reference)
    - A feature item's "Done when" names its tests before implementation starts. Write those tests first, then the code.
    - Testbed checks stay for what tests can't show (other distros, real hardware), but they don't replace a test.
    - If `cmd/` code can't be tested yet (it calls `virsh`, `sudo` or `ssh` directly), say so in the item and point at M2.3. Never skip the test silently.
+8. **Specs with OpenSpec** (M4.8, 2026-11-12): `openspec/specs/<capability>/spec.md` describes what vmherd does today. Every scenario ends with a `**Test:**` line naming the test that proves it, or "none yet" and why. A feature or behaviour change goes through `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. The change in `openspec/changes/<name>/` names its milestone.md item, its spec delta names the tests, and its tasks write those tests first. The rules are in `openspec/config.yaml`. A small bug fix follows item 7 without a change, but updates the spec when a scenario's behaviour or test changes. Check with `openspec validate --specs --strict`.
 
 ---
 

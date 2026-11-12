@@ -9,6 +9,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 - Before committing: `gofmt -l .` is empty, `go vet ./...`, `go test ./...` and `golangci-lint run` all pass.
 - Tick the checkbox `[x]` in the same commit that fixes the item.
 - **Test first** (M4.7): a bug fix starts with a test that fails for the reported reason (unit test where possible, otherwise an e2e case in `test/e2e/`), and the result note says how it failed before the fix. A feature item's "Done when" names its tests before work starts; they are written before the code. Testbed checks cover what tests can't (other distros, real hardware) but don't replace a test. Where `cmd/` code can't be tested yet, the item says so and points at M2.3.
+- **OpenSpec** (M4.8): this file stays the plan and its order. A feature or behaviour-change item is carried out as an OpenSpec change (`/opsx:propose <item>`) in `openspec/changes/`, which names the item; the item links the change. `openspec/specs/` is the current behaviour, with the test for each scenario.
 - 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.49 before fixing. If it doesn't reproduce, close the item with a note.
 - 🧭 **Decision** = needs a product decision from the maintainer before any code changes.
 - Severity: **Crit** / **High** / **Med** / **Low**.
@@ -21,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`) | 7 | 0 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 8 | 1 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
@@ -544,6 +545,12 @@ Note: the default network name collision is handled under M1.2.
     - Where `cmd/` code can't be tested yet, the item says so and points at M2.3, instead of skipping the test silently.
   - **Done when:** CLAUDE.md's Development Workflow and "How to use this file" carry the rule, and the next bug fix after it follows it.
   - **Status (2026-11-12):** The rule is in CLAUDE.md (Development Workflow, item 7) and in "How to use this file". The checkbox gets ticked when the next bug fix follows the rule; its result note names this item.
+
+- [x] **M4.8 — Specs and changes with OpenSpec** · Med
+  - **Files:** `openspec/` (config, specs), `.claude/skills/openspec-*`, `.claude/commands/opsx/`, `CLAUDE.md` (Development Workflow item 8, Project Structure), this file's "How to use" section
+  - **Problem:** Behaviour lives in code, tests and item notes, but nowhere as one list of what vmherd promises and which test proves each promise. Feature items describe their tests loosely, so "test first" (M4.7) has nothing fixed to start from.
+  - **Design:** OpenSpec (`spec-driven` schema) as in ccattler. `openspec/config.yaml` adds vmherd's rules: proposals name the milestone item and compare with Vagrant/vagrant-libvirt; every spec scenario names its test or says "none yet" and why; designs list failure cases and keep the M1.19 "never remove before the replacement is verified" rule; tasks start with the failing tests and end with lint, tests, a testbed or e2e run, a review and ticking the item. milestone.md stays the plan; OpenSpec holds each feature's spec, design and tasks.
+  - **Result (2026-11-12):** OpenSpec 1.17.0 (Homebrew; npm's 2.0.0 was one day old), `openspec init --tools claude`: six skills and six `/opsx:*` commands; telemetry off in the global config. Eight main specs written from the code as it is today: herdfile, project-state, vm-lifecycle, images, networking, shared-folders, provisioning, ssh-access: 48 requirements. Each of the 219 test references is checked to exist; 25 scenarios say "none yet" (mostly `cmd/` code, M2.3). `openspec validate --specs --strict` passes. Gaps found while writing them, not yet items: `vmherd ssh -- cmd` exits 1 instead of the remote exit code (Vagrant passes it through); `vmherd provision` stops at the first failing VM while up/down/destroy attempt every VM; no test for a checksum mismatch; `TestBackoffSequenceValues` re-implements the backoff loop instead of calling the code.
 
 ---
 

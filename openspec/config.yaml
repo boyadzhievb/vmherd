@@ -1,0 +1,37 @@
+schema: spec-driven
+
+# Engineering rules live in CLAUDE.md, the work plan and its order in
+# milestone.md. They are referenced here, never restated.
+context: |
+  Read CLAUDE.md (code style, anti-pattern rules, Development Workflow item 7
+  "Write the test first") and the milestone.md item before writing any
+  artifact. milestone.md is the plan and its order; every change names the
+  item it implements (e.g. M6.9) and the item links back to the change.
+  Specs in openspec/specs/ describe what vmherd does today; scenarios marked
+  "Test: none yet" are known gaps, mostly cmd/ code that needs M2.3.
+  vmherd replaces Vagrant for libvirt/KVM users: behaviour is compared with
+  Vagrant and vagrant-libvirt, and differences are deliberate and stated.
+
+rules:
+  proposal:
+    - Name the milestone.md item and state what is out of scope
+    - Say how Vagrant or vagrant-libvirt handles the same thing, and why vmherd matches or differs
+  specs:
+    - Every requirement has at least one scenario, and every scenario ends with a "- **Test:**" line naming the test that proves it (package path and Go test function, or test/e2e test and phase)
+    - A scenario without a test says "none yet" and why (usually "cmd/ code, needs M2.3"); never leave it out silently
+    - Scenarios describe what a user sees (CLI output, exit code, files, libvirt objects, guest state), never internal function calls
+  design:
+    - List the failure cases and what vmherd does in each, including partial failures across several VMs
+    - Never remove something (VM, disk, cached image, lock entry) before its replacement is verified (rule from M1.19)
+  tasks:
+    - The first tasks write the tests named in the spec scenarios and record how each fails before the fix
+    - The last tasks are gofmt, golangci-lint, go test ./..., an e2e or testbed run on .71, an independent review, and ticking the milestone.md item with its Result note
+
+operations:
+  apply:
+    guidance:
+      - Read the code a task touches before changing it; follow CLAUDE.md's style rules
+      - Report real test results with their output; never mark a task done on a test that was not run
+  archive:
+    guidance:
+      - Check that the main specs still name existing tests after the merge
