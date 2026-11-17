@@ -30,7 +30,7 @@ Before `up`, the scenario test SHALL check that every host port the scenario for
 - **Test:** test/e2e/TestAcceptanceScenarios (checkHostPortsFree)
 
 ### Requirement: The application answers through forwarded ports
-After `up` exits 0, the frontend SHALL answer HTTP 200 on 127.0.0.1:8081 and the backend SHALL answer HTTP 200 on 127.0.0.1:8080/api/scores, both through vmherd's port forwarding. The checks SHALL retry within a bounded time, and a failure SHALL name the URL, port and last response or error.
+After `up` exits 0, the frontend SHALL answer HTTP 200 on 127.0.0.1:8081/score, which its nginx proxies to the backend, and the backend SHALL answer HTTP 200 on 127.0.0.1:8080/api/scores, both through vmherd's port forwarding. The checks SHALL retry within a bounded time, and a failure SHALL name the URL, port and last response or error.
 
 #### Scenario: Single VM
 - **WHEN** `vmherd up` finishes for terramino-single
@@ -39,7 +39,7 @@ After `up` exits 0, the frontend SHALL answer HTTP 200 on 127.0.0.1:8081 and the
 
 #### Scenario: Three VMs
 - **WHEN** `vmherd up` finishes for terramino-multi
-- **THEN** both URLs answer HTTP 200; the backend's answer depends on redis on another VM, and the frontend proxies to the backend on another VM
+- **THEN** both URLs answer HTTP 200, and the frontend's answer on 8081/score comes from the backend on another VM through the frontend's proxy (nginx answers 503 when the backend is down). The redis link is not checked here: `/score` answers 0 without redis.
 - **Test:** test/e2e/TestAcceptanceScenarios (checkForwardedPorts)
 
 #### Scenario: Application not started

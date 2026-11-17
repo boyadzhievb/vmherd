@@ -50,6 +50,9 @@ const (
 	scenarioMarkerPath = "/var/tmp/acceptance-marker"
 	// scenarioMarkerContent is what scenarioMarkerPath holds.
 	scenarioMarkerContent = "kept"
+	// guestBootIDPath changes on every guest boot; reading it before down and
+	// after up proves the VM really rebooted.
+	guestBootIDPath = "/proc/sys/kernel/random/boot_id"
 )
 
 // nameResolutionCheck is a host name one VM must resolve to an address in
@@ -68,15 +71,16 @@ type acceptanceScenario struct {
 }
 
 // acceptanceScenarios lists every scenario. They run one after the other:
-// they forward the same host ports.
+// they forward the same host ports. 8081/score goes through the frontend's
+// nginx proxy to the backend (nginx answers 503 when the backend is down).
 var acceptanceScenarios = []acceptanceScenario{
 	{
 		directoryName:   "terramino-single",
-		applicationURLs: []string{"http://127.0.0.1:8081/", "http://127.0.0.1:8080/api/scores"},
+		applicationURLs: []string{"http://127.0.0.1:8081/score", "http://127.0.0.1:8080/api/scores"},
 	},
 	{
 		directoryName:   "terramino-multi",
-		applicationURLs: []string{"http://127.0.0.1:8081/", "http://127.0.0.1:8080/api/scores"},
+		applicationURLs: []string{"http://127.0.0.1:8081/score", "http://127.0.0.1:8080/api/scores"},
 		nameResolutionChecks: []nameResolutionCheck{
 			{vmName: "backend", hostName: "redis.local"},
 			{vmName: "frontend", hostName: "backend.local"},
@@ -95,6 +99,10 @@ func TestAcceptanceScenarios(t *testing.T) {
 	if scenarioRoot == "" {
 		scenarioRoot = defaultScenarioDirectory
 	}
+	if _, err := os.Stat(scenarioRoot); err != nil {
+		t.Fatalf("scenario directory %s: %v — set %s to the directory that holds the scenario directories (test/acceptance in the source tree)",
+			scenarioRoot, err, scenarioDirectoryVariable)
+	}
 	for _, scenario := range acceptanceScenarios {
 		t.Run(scenario.directoryName, func(t *testing.T) {
 			runAcceptanceScenario(t, scenario, filepath.Join(scenarioRoot, scenario.directoryName))
@@ -105,9 +113,11 @@ func TestAcceptanceScenarios(t *testing.T) {
 // runAcceptanceScenario is the user's path through one scenario; each phase
 // is a helper so a failure names the phase.
 func runAcceptanceScenario(t *testing.T, scenario acceptanceScenario, sourceDirectory string) {
-	hostPorts := forwardedHostPorts(loadHerdfile(t, sourceDirectory))
-	checkHostPortsFree(t, hostPorts)
+	// newScenarioProject removes this test's leftovers of an aborted run
+	// first, so their VMs no longer hold the ports when they are checked.
 	project, herdfile := newScenarioProject(t, scenario, sourceDirectory)
+	hostPorts := forwardedHostPorts(herdfile)
+	checkHostPortsFree(t, hostPorts)
 
 	project.mustVMHerdLong(t, "up")
 	checkForwardedPorts(t, scenario.applicationURLs)
@@ -209,7 +219,9 @@ func checkHostPortsFree(t *testing.T, hostPorts []int) {
 	for _, hostPort := range hostPorts {
 		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(hostPort)))
 		if err != nil {
-			t.Fatalf("host port %d is not free: %v\n%s", hostPort, err, describePortHolder(t, hostPort))
+			t.Fatalf("host port %d is not free: %v\n%s\nIf it is a leftover vmherd tunnel ('ssh -N -L'), kill its PID "+
+				"or run 'vmherd destroy' in the project that uses it; otherwise stop the service holding the port",
+				hostPort, err, describePortHolder(t, hostPort))
 			return
 		}
 		if err := listener.Close(); err != nil {
@@ -304,7 +316,11 @@ func checkNamesResolveAcrossVMs(t *testing.T, project e2eProject, checks []nameR
 			continue
 		}
 		for _, line := range strings.Split(output, "\n") {
-			address := net.ParseIP(strings.Fields(line)[0])
+			columns := strings.Fields(line)
+			if len(columns) == 0 {
+				continue
+			}
+			address := net.ParseIP(columns[0])
 			if address == nil || !subnet.Contains(address) {
 				t.Errorf("%s: %s resolves to %q, want an address in %s", check.vmName, check.hostName, line, subnetCIDR)
 			}
@@ -329,13 +345,33 @@ func checkDownUpKeepsData(t *testing.T, project e2eProject, vmNames []string, ap
 		// One argument is sent as a raw command line, so the redirect runs in the guest.
 		project.mustVMHerd(t, shortCommandTimeout, "ssh", vmName, "--", writeMarkerCommand)
 	}
+	bootIDsBeforeDown := readGuestBootIDs(t, project, vmNames)
 	project.mustVMHerd(t, shortCommandTimeout, "down")
 	project.mustVMHerdLong(t, "up")
+	bootIDsAfterUp := readGuestBootIDs(t, project, vmNames)
 	for _, vmName := range vmNames {
+		if bootIDsAfterUp[vmName] == bootIDsBeforeDown[vmName] {
+			t.Errorf("%s did not reboot across down + up: %s is still %s", vmName, guestBootIDPath, bootIDsAfterUp[vmName])
+		}
 		markerContent := project.mustVMHerd(t, shortCommandTimeout, "ssh", vmName, "--", "cat", scenarioMarkerPath)
 		if strings.TrimSpace(markerContent) != scenarioMarkerContent {
 			t.Errorf("%s: %s after down + up holds %q, want %q", vmName, scenarioMarkerPath, markerContent, scenarioMarkerContent)
 		}
 	}
 	checkForwardedPorts(t, applicationURLs)
+}
+
+// readGuestBootIDs returns each VM's current boot ID, which the guest kernel
+// picks anew on every boot.
+func readGuestBootIDs(t *testing.T, project e2eProject, vmNames []string) map[string]string {
+	t.Helper()
+	bootIDs := make(map[string]string, len(vmNames))
+	for _, vmName := range vmNames {
+		bootID := strings.TrimSpace(project.mustVMHerd(t, shortCommandTimeout, "ssh", vmName, "--", "cat", guestBootIDPath))
+		if bootID == "" {
+			t.Fatalf("%s: %s is empty", vmName, guestBootIDPath)
+		}
+		bootIDs[vmName] = bootID
+	}
+	return bootIDs
 }

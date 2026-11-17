@@ -65,17 +65,18 @@ vms:
         inline: |
           cd /home/vagrant/terramino-go
           for i in $(seq 1 30); do
-            REDIS_IP=$(getent hosts redis.local | awk '{print $1}') && break
+            REDIS_IP=$(getent hosts redis.local | awk '{print $1}' | head -n1) && break
             echo "Waiting for redis.local to be resolvable..."
             sleep 2
           done
+          [ -n "${REDIS_IP:-}" ] || { echo "redis.local did not resolve within 60 s — is avahi-daemon running on redis?" >&2; exit 1; }
           docker build -f Dockerfile.backend -t backend .
           docker rm -f backend 2>/dev/null || true
           docker run -d --name backend --restart unless-stopped -p 8080:8080 \
             -e REDIS_HOST=redis.local \
             -e REDIS_PORT=6379 \
             -e TERRAMINO_PORT=8080 \
-            --add-host redis.local:${REDIS_IP} \
+            --add-host "redis.local:${REDIS_IP}" \
             backend
 
   - name: frontend
@@ -108,14 +109,15 @@ vms:
           done
           sed -i 's#proxy_pass http://backend:8080#proxy_pass http://backend.local:8080#' nginx.conf
           for i in $(seq 1 30); do
-            BACKEND_IP=$(getent hosts backend.local | awk '{print $1}') && break
+            BACKEND_IP=$(getent hosts backend.local | awk '{print $1}' | head -n1) && break
             echo "Waiting for backend.local to be resolvable..."
             sleep 2
           done
+          [ -n "${BACKEND_IP:-}" ] || { echo "backend.local did not resolve within 60 s — is avahi-daemon running on backend?" >&2; exit 1; }
           docker build -f Dockerfile.frontend -t frontend .
           docker rm -f frontend 2>/dev/null || true
           docker run -d --name frontend --restart unless-stopped -p 8081:8081 \
-            --add-host backend.local:${BACKEND_IP} \
+            --add-host "backend.local:${BACKEND_IP}" \
             frontend
 
 network:

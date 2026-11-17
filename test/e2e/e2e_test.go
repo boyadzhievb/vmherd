@@ -228,16 +228,17 @@ func newE2EProject(t *testing.T, distro distroCase, subnetOctet int) e2eProject 
 
 // cleanUpNowAndOnFailure removes the project's leftovers of an earlier,
 // aborted run, and registers a cleanup that destroys the project and removes
-// any leftovers if the test fails.
+// any leftovers if the test fails. A network another project still uses
+// fails the test up front and is only logged at cleanup.
 func cleanUpNowAndOnFailure(t *testing.T, project e2eProject) {
 	t.Helper()
-	removeLeftovers(t, project)
+	removeLeftovers(t, project, t.Fatalf)
 	t.Cleanup(func() {
 		if t.Failed() {
 			if result := project.vmherd(t, shortCommandTimeout, "destroy"); result.exitCode != 0 {
 				t.Logf("cleanup: vmherd destroy exited %d:\n%s", result.exitCode, result.output)
 			}
-			removeLeftovers(t, project)
+			removeLeftovers(t, project, t.Logf)
 		}
 	})
 }
@@ -486,8 +487,9 @@ func linesWithPrefix(text, prefix string) []string {
 
 // removeLeftovers force-removes this project's domains, disks, seeds and
 // network from an earlier aborted run. Names are matched by the project
-// prefix, which only e2e projects use.
-func removeLeftovers(t *testing.T, project e2eProject) {
+// prefix, which only e2e projects use. The network is kept, and reported via
+// reportNetworkInUse, while a domain outside that prefix is attached to it.
+func removeLeftovers(t *testing.T, project e2eProject, reportNetworkInUse func(format string, args ...any)) {
 	t.Helper()
 	for _, domainName := range project.leftoverDomains(t) {
 		runSudoLogged(t, "virsh", "destroy", domainName)
@@ -496,10 +498,32 @@ func removeLeftovers(t *testing.T, project e2eProject) {
 	for _, fileName := range project.leftoverImageFiles(t) {
 		runSudoLogged(t, "rm", "-f", filepath.Join(libvirtImageDir, fileName))
 	}
-	if project.networkExists(t) {
-		runSudoLogged(t, "virsh", "net-destroy", project.networkName)
-		runSudoLogged(t, "virsh", "net-undefine", project.networkName)
+	if !project.networkExists(t) {
+		return
 	}
+	foreignDomains := foreignDomainsOnNetwork(project.networkName, project.domainPrefix, networksByDomain(t))
+	if len(foreignDomains) > 0 {
+		reportNetworkInUse("not removing network %s: domains outside this test (prefix %s) are attached to it: %s — "+
+			"destroy them (or 'vmherd destroy' in their project), or give the test project another network name",
+			project.networkName, project.domainPrefix, strings.Join(foreignDomains, ", "))
+		return
+	}
+	runSudoLogged(t, "virsh", "net-destroy", project.networkName)
+	runSudoLogged(t, "virsh", "net-undefine", project.networkName)
+}
+
+// networksByDomain maps every libvirt domain, running or shut off, to the
+// libvirt networks its interfaces are attached to.
+func networksByDomain(t *testing.T) map[string][]string {
+	t.Helper()
+	attachedNetworks := make(map[string][]string)
+	for _, domainName := range strings.Split(sudoOutput(t, "virsh", "list", "--all", "--name"), "\n") {
+		if domainName = strings.TrimSpace(domainName); domainName == "" {
+			continue
+		}
+		attachedNetworks[domainName] = parseDomiflistNetworks(sudoOutput(t, "virsh", "domiflist", domainName))
+	}
+	return attachedNetworks
 }
 
 // runSudoLogged runs a cleanup command with sudo and logs a failure instead
