@@ -47,9 +47,12 @@ vmherd version                 # show version
 
 ```yaml
 # Herdfile
+images:                          # KEY: REAL_URL — every image a VM uses, with its download URL
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+
 vms:
   - name: ctrl
-    image: ubuntu:noble          # resolves to cloud-images.ubuntu.com/noble/current/...
+    image: ubuntu:noble          # a key from images: above; no built-in lookup
     cpus: 2
     memory: 4096                 # MB
     disk: 20G
@@ -103,9 +106,9 @@ Decision (2026-11-04, remediation item M0.7): every VM shares the project direct
 
 ---
 
-## Image Registry (Built-In)
+## Image Sources
 
-vmherd ships with a built-in registry of official cloud image URLs. No external service needed.
+Every image is a `KEY: REAL_URL` entry in the Herdfile's `images:` section; vmherd downloads only those URLs and never looks a name up on its own. `vmherd init` writes the vendors' official URLs below into a new Herdfile (`internal/config/images.go`). No external service needed.
 
 | Distro | Source | Format |
 |--------|--------|--------|
