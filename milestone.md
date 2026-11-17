@@ -10,7 +10,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 - Tick the checkbox `[x]` in the same commit that fixes the item.
 - **Test first** (M4.7): a bug fix starts with a test that fails for the reported reason (unit test where possible, otherwise an e2e case in `test/e2e/`), and the change's `tasks.md` says how it failed before the fix. A feature item's "Done when" names its tests before work starts; they are written before the code. Testbed checks cover what tests can't (other distros, real hardware) but don't replace a test. Where `cmd/` code can't be tested yet, the item says so and points at M2.3.
 - **OpenSpec** (M4.8, every item from 2026-11-17): this file stays the plan and its order. Every item, bug fixes included, is carried out as an OpenSpec change (`openspec-propose` skill) in `openspec/changes/`, which names the item; the item links the change. The change's `tasks.md` is the item's checklist and holds its dated results; the item keeps its problem, plan and a short Result note. After archiving, the link points at `openspec/changes/archive/<date>-<name>/`. `openspec/specs/` is the current behaviour, with the test for each scenario.
-- 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on testbed-100.49 before fixing. If it doesn't reproduce, close the item with a note.
+- 🔬 **Verify on testbed** = the bug was found by reading the code and has not been reproduced yet. Reproduce it on the m4800 testbed before fixing. If it doesn't reproduce, close the item with a note.
 - 🧭 **Decision** = needs a product decision from the maintainer before any code changes.
 - Severity: **Crit** / **High** / **Med** / **Low**.
 
