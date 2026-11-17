@@ -22,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 10 | 2 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
@@ -575,6 +575,13 @@ Note: the default network name collision is handled under M1.2.
     - `TestSpecTestReferenceForms` (a table test on sample lines) covers: a package test, an e2e test with phases, "none yet" with and without a reason, a label before the references, and a line with no reference. It is written first and fails before the parser exists.
     - A test that was really renamed (in a scratch copy) makes `TestSpecTestReferencesExist` fail, naming the spec line.
     - Carried out as an OpenSpec change (to propose).
+
+- [ ] **M4.10 — Refuse only real Co-Authored-By trailers** · Low
+  - **Files:** `.claude/skills/commit/SKILL.md` (step 5), `.claude/hooks/pre-commit-gate.sh`, new `.claude/hooks/co-author-check.sh`, `test/tooling/`
+  - **Problem:** Both co-author guards match the phrase anywhere. The commit skill's `grep -qi 'co-authored-by'` refused a message whose body only named the rule (found 2026-11-17 while committing M4.3). The hook's `grep -qi 'Co-Authored-By'` on the command text blocks e.g. `git commit -m "Ban Co-Authored-By mentions"` in the same way. Neither is tested.
+  - **Fix:** One check script, used by both, that refuses only trailer-shaped lines (`Co-Authored-By:` at the start of a line or of a `-m` value), with a table test.
+  - **Done when:** A table test of the check script passes. It was written first and failed on a body that only mentions the phrase. The skill and the hook both call the script.
+  - **OpenSpec change:** [`commit-co-author-check`](openspec/changes/commit-co-author-check/) (checklist and results in its `tasks.md`).
 
 ---
 
