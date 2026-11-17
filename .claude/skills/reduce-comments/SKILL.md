@@ -1,5 +1,8 @@
 ---
+name: reduce-comments
 description: Reduce Go function comments to 4 lines max
+disable-model-invocation: true
+argument-hint: "[file or directory]"
 ---
 
 # Reduce Go Function Comments

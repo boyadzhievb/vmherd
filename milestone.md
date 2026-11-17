@@ -22,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 1 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
@@ -500,12 +500,13 @@ Note: the default network name collision is handled under M1.2.
   - **Fix:** Enable `funlen` (80 lines), `errcheck` (`check-blank: true`), `revive` (exported comments, receiver naming), `mnd`, `dupl`, `gosec`, `noctx`, `wrapcheck`, `varnamelen` and `gocognit`. Fix the violations package by package. This item can be pulled forward and enabled per linter as other items land.
   - **Done when:** CI runs with this config, and CLAUDE.md maps each rule to its linter.
 
-- [ ] **M4.3 — Fix the project skills' layout** · High
+- [x] **M4.3 — Fix the project skills' layout** · High
   - **Files:** `.claude/skills/*.md`
   - **Problem:** Skills are flat `.md` files, but Claude Code only loads `.claude/skills/<name>/SKILL.md` with `name` and `description` frontmatter, so none of the four load. Three have no frontmatter at all.
   - **Fix:** Move `commit`, `test` and `reduce-comments` to `<name>/SKILL.md` with frontmatter. Delete `improve`, which only repeats CLAUDE.md. Have the `commit` skill state the project's commit rules (no Co-Authored-By, no amend, no push).
   - **Done when:** The skills appear in Claude Code's skill list.
   - **OpenSpec change:** [`project-skills-layout`](openspec/changes/project-skills-layout/) (checklist and results in its `tasks.md`).
+  - **Result (2026-11-17):** `commit`, `test` and `reduce-comments` are now `<name>/SKILL.md` with frontmatter, and `improve` is deleted. `commit` and `reduce-comments` are user-only (`disable-model-invocation: true`). `test` is listed for the model, and `/commit` runs from its new path. `test/tooling/skills_test.go` checks every entry in `.claude/skills/` (directory, `SKILL.md`, frontmatter, `name` equal to the directory name, a description). Before the move it failed on the four flat files. The review found 1 medium and 8 low issues, plus nits, and all were fixed.
 
 - [ ] **M4.4 — Consolidate and correct the agents** · Med
   - **Files:** `.claude/agents/*.md`
