@@ -2,8 +2,10 @@
 # Equivalent of hashicorp-education/learn-vagrant-get-started 3.Vagrantfile
 #
 # Run by test/e2e TestAcceptanceScenarios (VMHERD_E2E_SCENARIOS=1), see
-# test/e2e/scenarios_test.go. Manual steps: vmherd up, then open
-# http://localhost:8081
+# test/e2e/scenarios_test.go. Manual steps:
+#   mkdir -p terramino-go     (needed until M1.21: up fails on a missing share folder)
+#   vmherd up
+#   open http://localhost:8081
 
 images:
   ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
