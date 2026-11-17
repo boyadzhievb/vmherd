@@ -22,7 +22,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M1 | Correctness of existing features | 20 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 8 | 1 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 1 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
@@ -553,6 +553,26 @@ Note: the default network name collision is handled under M1.2.
   - **Result (2026-11-12):** OpenSpec 1.17.0 (Homebrew; npm's 2.0.0 was one day old), `openspec init --tools claude`: six skills and six `/opsx:*` commands; telemetry off in the global config. Eight main specs written from the code as it is today: herdfile, project-state, vm-lifecycle, images, networking, shared-folders, provisioning, ssh-access: 48 requirements. Each of the 219 test references is checked to exist; 25 scenarios say "none yet" (mostly `cmd/` code, M2.3). `openspec validate --specs --strict` passes. Gaps found while writing them, not yet items: `vmherd ssh -- cmd` exits 1 instead of the remote exit code (Vagrant passes it through); `vmherd provision` stops at the first failing VM while up/down/destroy attempt every VM; no test for a checksum mismatch; `TestBackoffSequenceValues` re-implements the backoff loop instead of calling the code.
   - **Update (2026-11-17):** OpenSpec 2.0.0 (Homebrew stable), skills regenerated with `openspec update`, as in ccattler: shared copies in `.agents/skills/`, `.claude/skills/openspec-*` symlinked to them, `/opsx:*` commands removed (2.0 installs skills only), the apply skill pinned to `model: opus`. Every item, bug fixes included, is now an OpenSpec change (CLAUDE.md workflow items 8–9).
 
+- [ ] **M4.9 — A test checks that every spec names tests that exist** · Med
+  - **Files:** new `test/specs/spec_references_test.go` (no build tag), `openspec/config.yaml` (archive guidance), `openspec/specs/*/spec.md` (only lines the test finds wrong)
+  - **Problem:** Every scenario in `openspec/specs/` ends with a `**Test:**` line, and CLAUDE.md workflow item 8 relies on it: the spec says which test proves the behaviour. Nothing checks those lines. M4.8 checked its 219 references once, by hand. Since then a renamed or deleted test leaves a spec naming a test that no longer exists, and `openspec validate --strict` doesn't notice: it checks structure, not content. The archive skill's guidance ("check that the main specs still name existing tests") is a manual step. OpenSpec 2.0's optional `verify` workflow doesn't close the gap either: it searches the code for keywords, never for the named tests.
+  - **How others do it:** Vagrant has no specs, so nothing to compare. ccattler keeps its docs honest with `TestDocCrossCheck*` tests (for example, the route table in `AUTHZ_GRAPH.md` against the routes registered in `api/server.go`). This item does the same for spec test references.
+  - **Design:**
+    - An ordinary Go test in `test/specs/` (like `test/acceptance/`), so `go test ./...` and CI run it with no new tool.
+    - It reads every `**Test:**` line in `openspec/specs/*/spec.md` and accepts three forms, the ones the specs use today:
+      - `<package path>/Test<Name>`, e.g. `internal/config/TestPortForwardInvalidHostPort`: a `func Test<Name>(t *testing.T)` must exist in a `_test.go` file of that directory;
+      - `test/e2e/Test<Name> (<phase>, …)`: the test function exists, and each phase in parentheses is a function in `test/e2e/`;
+      - `none yet — <reason>`: allowed, but the reason must not be empty.
+    - Text around the references (a label like "overlap detection:" or a note after the names) is allowed. A line that has neither a reference nor "none yet" fails, so a scenario can't quietly lose its test.
+    - Functions are found with `go/parser` over every `_test.go` file, whatever its build tag, so references to `integration` tests (`test/e2e`, `internal/vm/vm_integration_test.go`) are checked without building them.
+    - Each failure names the spec file, line, scenario and the reference, e.g. `openspec/specs/networking/spec.md:42 (scenario "Overlap with a libvirt network"): internal/network/TestSubnetsOverlapX does not exist`. All failures are reported in one run, not only the first.
+    - Only main specs are checked. A change's spec delta names tests that its first tasks will write, so they don't exist when it is proposed. They are checked when the archive merges them into `openspec/specs/`, because the archive commit runs `go test ./...`. The archive guidance in `openspec/config.yaml` changes from "check by hand" to "`go test ./test/specs/` passes".
+    - Out of scope: checking that a test actually proves its scenario (that is the review's job), and counting "none yet" lines (a separate list if wanted).
+  - **Done when:**
+    - `TestSpecTestReferencesExist` passes on today's specs. Any line it finds wrong is fixed in the spec, and the fix is recorded in the change's `tasks.md`.
+    - `TestSpecTestReferenceForms` (a table test on sample lines) covers: a package test, an e2e test with phases, "none yet" with and without a reason, a label before the references, and a line with no reference. It is written first and fails before the parser exists.
+    - A test that was really renamed (in a scratch copy) makes `TestSpecTestReferencesExist` fail, naming the spec line.
+    - Carried out as an OpenSpec change (to propose).
 
 ---
 
@@ -731,7 +751,7 @@ Direction (decided 2026-11-11): vmherd manages a project's whole development env
 **Not building:** a provisioning language of its own, a Dev Container implementation, a template registry or marketplace, VM cloning, `depends_on` start ordering (playbook order covers it), multi-cloud or remote hosts, a GUI.
 
 **Order across milestones** (reliability before breadth):
-M1.19 → M1.20 → M6.4 → M4.7 → M6.9 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
+M1.19 → M1.20 → M6.4 → M4.7 → M6.9 → M4.9 → M6.8 → M6.1 → M6.2 → M6.5 → M5.2 → M3.6 → M7.1 → M7.2 → M7.3 → M7.4 → M6.3 → M5.3 → M7.5 → M7.6 → M2.1 → M6.6 → M6.7.
 M5.2 (addresses that survive a rebuild) and M3.6 (a per-project `known_hosts`) come before M7 because a generated SSH config and Ansible inventory are only as good as the addresses and host keys in them.
 
 - [ ] **M7.1 — `vmherd ssh-config`: let other tools connect** · Feature
