@@ -505,7 +505,7 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** Skills are flat `.md` files, but Claude Code only loads `.claude/skills/<name>/SKILL.md` with `name` and `description` frontmatter, so none of the four load. Three have no frontmatter at all.
   - **Fix:** Move `commit`, `test` and `reduce-comments` to `<name>/SKILL.md` with frontmatter. Delete `improve`, which only repeats CLAUDE.md. Have the `commit` skill state the project's commit rules (no Co-Authored-By, no amend, no push).
   - **Done when:** The skills appear in Claude Code's skill list.
-  - **OpenSpec change:** [`project-skills-layout`](openspec/changes/project-skills-layout/) (checklist and results in its `tasks.md`).
+  - **OpenSpec change:** [`project-skills-layout`](openspec/changes/archive/2026-11-17-project-skills-layout/) (checklist and results in its `tasks.md`).
   - **Result (2026-11-17):** `commit`, `test` and `reduce-comments` are now `<name>/SKILL.md` with frontmatter, and `improve` is deleted. `commit` and `reduce-comments` are user-only (`disable-model-invocation: true`). `test` is listed for the model, and `/commit` runs from its new path. `test/tooling/skills_test.go` checks every entry in `.claude/skills/` (directory, `SKILL.md`, frontmatter, `name` equal to the directory name, a description). Before the move it failed on the four flat files. The review found 1 medium and 8 low issues, plus nits, and all were fixed.
 
 - [ ] **M4.4 — Consolidate and correct the agents** · Med

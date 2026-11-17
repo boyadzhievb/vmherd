@@ -20,7 +20,7 @@ M4.3. Implementation tasks (0.1–1.4) go to the `lead-developer` subagent (CLAU
 
 ## 2. Check in Claude Code
 
-- [x] 2.1 In a new Claude Code session in the repository: `commit`, `test` and `reduce-comments` appear in the skill list, and `improve` does not. Record what the list showed. A testbed run on .71 is not needed: no vmherd code changes. — 2026-11-17, new session (model's skill list): `test` and the six `openspec-*` skills listed, `improve` absent. `commit` and `reduce-comments` are not in the model's list, as intended by `disable-model-invocation: true`; the user then ran `/commit` in that session, and it loaded from `.claude/skills/commit/SKILL.md`. `reduce-comments` has the same layout and frontmatter keys and passes `TestProjectSkillsUseSkillLayout`, but it was not invoked. The user confirmed `improve` is not in their `/` menu.
+- [x] 2.1 In a new Claude Code session in the repository: `commit`, `test` and `reduce-comments` appear in the skill list, and `improve` does not. Record what the list showed. A testbed run on .71 is not needed: no vmherd code changes. — 2026-11-17, new session (model's skill list): `test` and the six `openspec-*` skills listed, `improve` absent. `commit` and `reduce-comments` are not in the model's list, as intended by `disable-model-invocation: true`; the user then ran `/commit` in that session, and it loaded from `.claude/skills/commit/SKILL.md`. `reduce-comments` has the same layout and frontmatter keys and passes `TestProjectSkillsUseSkillLayout`, but it was not invoked. The user confirmed `improve` is not in their `/` menu. Later in the same session: `/reduce-comments` ran from `.claude/skills/reduce-comments/SKILL.md`, and `/improve` was reported as not available.
 
 ## 3. Verification and record
 
