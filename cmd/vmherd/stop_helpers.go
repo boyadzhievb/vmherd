@@ -10,11 +10,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// stopVMsGracefully stops VMs in parallel: port forwarding first, then an
-// ACPI shutdown that is forced only after vm.GracefulShutdownTimeout. Every
-// VM is attempted. It returns the VMs that are now off and the joined errors
-// of the rest; a port forwarding that won't stop is an error but the VM still
-// counts as off.
+// stopVMsGracefully stops every VM in parallel: port forwarding first, then
+// an ACPI shutdown forced after vm.GracefulShutdownTimeout. It returns the VMs
+// now off and the joined errors of the rest; a port forwarding that won't stop
+// is an error, but its VM still counts as off.
 func stopVMsGracefully(project *config.Project, vms []config.VM) ([]config.VM, error) {
 	stopErrors := make([]error, len(vms))
 	portForwardErrors := make([]error, len(vms))

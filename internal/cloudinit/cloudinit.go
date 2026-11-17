@@ -200,12 +200,10 @@ func quoteForShell(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-// writeNetworkConfig generates the cloud-init network-config file. With an
-// ipAddress the interface gets that static address; without one it uses
-// DHCP keyed by MAC (the lease 'virsh domifaddr' looks up). Either way DNS is
-// dnsServer (derived from the host), never the DHCP-provided server. The
-// default route is written as 0.0.0.0/0, not netplan's "default": cloud-init
-// parses the config itself on distros without netplan (EL) and rejects it.
+// writeNetworkConfig writes the cloud-init network-config: ipAddress as a
+// static address, or DHCP keyed by MAC when empty. DNS is always the
+// host-derived dnsServer. The default route is 0.0.0.0/0, not netplan's
+// "default", which cloud-init rejects on distros without netplan (EL).
 func writeNetworkConfig(seedDir, ipAddress, gateway, dnsServer, macAddress string) error {
 	addressing := fmt.Sprintf(`    dhcp4: false
     addresses:

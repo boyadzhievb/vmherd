@@ -228,11 +228,10 @@ func extractHrefTargets(htmlContent string) []string {
 	}
 }
 
-// extractChecksumLinksFromHTML parses href attributes from an HTML directory
-// listing and returns absolute URLs for checksum files: the image's own
-// <image>.<hash> file first, then SHA256, SHA512 and generic lists. Only links
-// on the listing's HTTPS host are kept, so a tampered listing can't redirect
-// verification to another server.
+// extractChecksumLinksFromHTML returns absolute checksum-file URLs from an
+// HTML directory listing: the image's own <image>.<hash> file first, then
+// SHA256, SHA512 and generic lists. Only links on the listing's HTTPS host are
+// kept, so a tampered listing can't redirect verification elsewhere.
 func extractChecksumLinksFromHTML(htmlContent, baseURL, imageFilename string) []string {
 	baseHost := extractHostFromURL(baseURL)
 	upperImagePrefix := strings.ToUpper(imageFilename) + "."

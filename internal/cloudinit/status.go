@@ -59,10 +59,9 @@ func ClassifyStatusExitCode(exitCode int) FirstBootOutcome {
 }
 
 // FailureMarkerSearchCommand returns a guest shell command that prints every
-// line of logPath the runcmd script wrote to report a failure (failed step,
-// missing 9p). The whole log is searched: on many distros later boot output
-// (SSH host keys) pushes those lines out of the log's tail. Like grep, it
-// exits 1 when there are none.
+// failure marker line (failed step, missing 9p) in logPath, exiting 1 like
+// grep when there are none. It searches the whole log, because later boot
+// output can push the markers out of its tail.
 func FailureMarkerSearchCommand(logPath string) string {
 	return fmt.Sprintf("grep -F -e %s -e %s -- %s",
 		quoteForShell(FailedStepMarker+" "), quoteForShell(MissingNinePMarker), quoteForShell(logPath))

@@ -6,11 +6,10 @@ import (
 	"strings"
 )
 
-// ResolveDNS returns the DNS server to use for VMs.
-// If "auto", it reads the first non-loopback nameserver from /etc/resolv.conf.
-// Loopback addresses (127.x.x.x, ::1) are skipped because they point to a
-// host-local DNS cache that is unreachable from inside the VM.
-// Falls back to the gateway IP (the libvirt dnsmasq instance).
+// ResolveDNS returns the DNS server to use for VMs. For "auto" it reads the
+// first non-loopback nameserver from /etc/resolv.conf (a host-local cache on
+// 127.x or ::1 is unreachable from the VM), falling back to the gateway IP
+// (libvirt's dnsmasq).
 func ResolveDNS(dnsConfig, gatewayIP string) string {
 	if dnsConfig != "auto" && dnsConfig != "" {
 		return dnsConfig
