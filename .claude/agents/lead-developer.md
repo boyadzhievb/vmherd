@@ -2,6 +2,7 @@
 name: lead-developer
 description: Primary programming agent — implements features, writes tests, and maintains vmherd
 model: opus
+effort: medium
 tools:
   - Bash
   - Read

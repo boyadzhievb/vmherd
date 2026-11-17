@@ -1,7 +1,8 @@
 ---
 name: code-reviewer
 description: Reviews diffs for correctness bugs, style violations, and design issues
-model: sonnet
+model: opus
+effort: high
 tools:
   - Bash
   - Read

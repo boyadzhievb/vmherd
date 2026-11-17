@@ -1,7 +1,8 @@
 ---
 name: security-audit
 description: Audit vmherd security — command injection, path traversal, secret handling, download verification
-model: sonnet
+model: opus
+effort: high
 tools:
   - Bash
   - Read

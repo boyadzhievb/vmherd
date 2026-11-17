@@ -26,12 +26,15 @@ rules:
   tasks:
     - The first tasks write the tests named in the spec scenarios and record how each fails before the fix
     - The last tasks are gofmt, golangci-lint, go test ./..., an e2e or testbed run on .71, an independent review, and ticking the milestone.md item with its Result note
+    - tasks.md is the item's checklist: each task's result is recorded on its own line with the date (failing output first, deviations, testbed results or "not run" and why, review findings as fixed or rejected); milestone.md only links the change
 
 operations:
   apply:
     guidance:
       - Read the code a task touches before changing it; follow CLAUDE.md's style rules
       - Report real test results with their output; never mark a task done on a test that was not run
+      - Implementation tasks go to the lead-developer subagent (CLAUDE.md workflow item 9); it hands back an uncommitted diff, and the main session reruns the checks before ticking a task
   archive:
     guidance:
       - Check that the main specs still name existing tests after the merge
+      - Point the milestone.md item's link at openspec/changes/archive/<date>-<name>/ in the archive commit

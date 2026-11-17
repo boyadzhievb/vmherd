@@ -218,11 +218,21 @@ openspec/
 5. Error messages shown to user explicitly, never swallowed.
 6. Explain approach before implementing. No opportunistic changes.
 7. **Write the test first** (M4.7, 2026-11-12):
-   - A bug fix starts with a test that fails for the reported reason: a unit test where the code allows it, otherwise an e2e case in `test/e2e/`. Run it before the fix and record how it failed in the commit message or the item's result note.
+   - A bug fix starts with a test that fails for the reported reason: a unit test where the code allows it, otherwise an e2e case in `test/e2e/`. Run it before the fix and record how it failed on the task's line in the change's `tasks.md` (item 8).
    - A feature item's "Done when" names its tests before implementation starts. Write those tests first, then the code.
    - Testbed checks stay for what tests can't show (other distros, real hardware), but they don't replace a test.
    - If `cmd/` code can't be tested yet (it calls `virsh`, `sudo` or `ssh` directly), say so in the item and point at M2.3. Never skip the test silently.
-8. **Specs with OpenSpec** (M4.8, 2026-11-12): `openspec/specs/<capability>/spec.md` describes what vmherd does today. Every scenario ends with a `**Test:**` line naming the test that proves it, or "none yet" and why. A feature or behaviour change goes through `/opsx:propose` → `/opsx:apply` → `/opsx:archive`. The change in `openspec/changes/<name>/` names its milestone.md item, its spec delta names the tests, and its tasks write those tests first. The rules are in `openspec/config.yaml`. A small bug fix follows item 7 without a change, but updates the spec when a scenario's behaviour or test changes. Check with `openspec validate --specs --strict`.
+8. **Every milestone item is an OpenSpec change** (M4.8, 2026-11-12; as in ccattler from 2026-11-17):
+   - Bug fixes included. Start with the `openspec-propose` skill, implement with `openspec-apply-change`, and archive with `openspec-archive-change` (which syncs its specs). OpenSpec 2.0.0 installs skills only: the shared copies live in `.agents/skills/`, and `.claude/skills/openspec-*` are symlinks to them. `openspec list` shows the open changes.
+   - **milestone.md stays the plan and its order.** The item keeps its problem and plan, plus one line linking its change. The change's `tasks.md` is the item's checklist.
+   - **Results go on the task's line**, dated: the failing test output before the fix, deviations from the design, testbed results (or "not run" and why), and each review finding as fixed or rejected with one line of reasoning. A task found during the work is added as e.g. `2.3a (added <date>)`; a dropped one is struck through with the reason.
+   - **Commits per change:** `Mx.y: propose OpenSpec change <name>`; then the implementation, which ticks the item and adds its short Result note; then `Mx.y: archive OpenSpec change <name> (spec <capability>)` once every task and its follow-up are done. The archive commit points the item's link at `openspec/changes/archive/<date>-<name>/`.
+   - **Specs:** `openspec/specs/<capability>/spec.md` describes what vmherd does today. Every scenario ends with a `**Test:**` line naming the test that proves it, or "none yet" and why. The rules for each artifact are in `openspec/config.yaml`. Check with `openspec validate --specs --strict`. Never run `openspec init` unless asked.
+9. **Who does what** (ccattler subagent trial, adopted 2026-11-17):
+   - The `lead-developer` subagent (Opus, effort medium) implements a change's tasks from the change's artifacts alone; rework after review goes back to the same subagent.
+   - `code-reviewer`, plus `security-audit` for shell-outs, sudo, downloads, keys or shares, run on Opus at effort high. The implementer never reviews its own work.
+   - The main session keeps proposals, design decisions with the user, testbed runs and their diagnosis, verifying the hand-back (rerun gofmt, lint, tests), deciding on review findings, commits and releases.
+   - The subagent never commits, pushes or touches the testbed: it hands back an uncommitted diff with its test output and doubts.
 
 ---
 
