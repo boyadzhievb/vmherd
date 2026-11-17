@@ -14,6 +14,11 @@ on:
         description: "Comma-separated images (e.g. ubuntu:noble,rocky:9), or 'all'"
         required: false
         default: all
+      scenarios:
+        description: "Also boot the acceptance scenarios in test/acceptance (guests download packages, so slower)"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -33,6 +38,9 @@ jobs:
     env:
       # Pull requests boot ubuntu:noble only; everything else runs the full table.
       VMHERD_E2E_IMAGES: ${{ github.event_name == 'pull_request' && 'ubuntu:noble' || inputs.images || 'all' }}
+      # The nightly run and manual dispatch (unless scenarios is unticked) also boot
+      # the acceptance scenarios; pull requests and pushes leave this empty (skipped).
+      VMHERD_E2E_SCENARIOS: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scenarios)) && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
