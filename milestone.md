@@ -21,7 +21,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
 | M1 | Correctness of existing features | 21 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
-| M3 | Supply chain, SSH trust, CI | 10 | 0 |
+| M3 | Supply chain, SSH trust, CI | 11 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
@@ -483,6 +483,23 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** The 30% threshold is too low to catch regressions.
   - **Fix:** Raise it step by step as M2.3 lands (40 → 50 → 60%). Also give `cmd/vmherd` its own floor, so pure packages can't hide it: 40% once M2.3 lands (it is 4% on 2026-11-11), then raised with the total.
   - **Done when:** The total threshold is ≥ 60% and the `cmd/vmherd` floor is enforced in CI.
+
+- [ ] **M3.11 — One checked list of image URLs, refreshed daily by CI pull requests** · Med
+  - **Files:** new `images.yaml` (repo root or `internal/config/`, embedded with `go:embed`), `internal/config/images.go` (`BuiltInImages`), `test/e2e/e2e_test.go` (distro table), new `.github/workflows/image-urls.yml`, a small checker (e.g. `cmd/image-urls-check/` or a test behind a tag), README "Finding an image URL"
+  - **Problem:** Users have no way to find the right URL for an image. `vmherd init` writes URLs for only 4 images (ubuntu noble/resolute, fedora 44/45). The README names 10 and says "add the vendor's image URL" for the other 6, without saying which file to pick. Vendors publish several variants (Debian `genericcloud` has no 9p, as M1.20 found; Rocky `GenericCloud` vs `EC2`). The URLs CI has proven (Debian, Rocky, Alma, Arch) exist only in the e2e test table. Fedora's file names pin a build number and go stale.
+  - **How Vagrant does it:** `vagrant box add ubuntu/noble` looks the name up in HCP Vagrant Cloud, so users never see a URL, at the cost of depending on that registry (EOL Nov 2026). vmherd has no registry on purpose, so it owes users a checked list.
+  - **Design (decided 2026-11-17, option A):**
+    - **One list in the repo**, `images.yaml`: per image name, the vendor URL, the variant and why (e.g. "genericcloud: no 9p, set `shared_folders: []`"), and the vendor's checksum URL. It is embedded in the binary. `vmherd init`, `list-images`, `pull` without a Herdfile, the README and the e2e distro table all read it, so a URL in the docs is one CI has booted.
+    - **No runtime fetching.** vmherd never downloads the list. It ships with the release, works offline, and adds no registry (principle 1, air-gap use). Users who need a newer URL copy it from the repo.
+    - **A daily CI job** (GitHub-hosted runner, no VMs): for each entry, check that the URL answers (HEAD), and that the vendor's checksum file lists that file name. When a vendor moved on (Fedora build number, a removed file), the job finds the current file in the vendor's directory and opens **a pull request**, never a direct commit. The PR shows old → new URL and hash per image. A failing check with no replacement opens an issue instead.
+    - **Booting stays with integration.yml:** the nightly run on y510p boots every entry of the same list. A PR that changes the list runs the distro test for the changed images.
+    - **Fits M6.1:** `images.yaml` says what is current; `Herd.lock` says what a project uses. `update-images` (M6.1) can suggest the list's newer URL.
+  - **Risks:** a bot changing download URLs is a supply-chain path, because the checksum comes from the same vendor host. Hence PR only, the hash shown in the PR, and the boot test before merge. Vendor directory layouts change: the checker fails loudly rather than guessing.
+  - **Done when:**
+    - `images.yaml` is the only place URLs live: a test fails if `BuiltInImages`, the e2e table or the README name a URL not in it.
+    - The checker has unit tests on recorded vendor listings: still current, moved (finds the new file), and gone (reports, no guess).
+    - The daily workflow ran once on GitHub and its output is linked on the item.
+    - The README section "Finding an image URL" names each vendor's directory, the variant rule and the known traps, and links to `images.yaml`.
 
 ---
 
