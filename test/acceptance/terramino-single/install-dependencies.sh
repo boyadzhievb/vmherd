@@ -16,6 +16,13 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
   https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
   | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
+# Use the classic overlay2 image store, written before Docker is installed so
+# the daemon starts with it. Docker 29's default containerd image store fails
+# to extract a layer of golang:1.22, the base image of Terramino's
+# Dockerfile.backend ("archive/tar: invalid tar header").
+install -m 0755 -d /etc/docker
+echo '{"features":{"containerd-snapshotter":false}}' > /etc/docker/daemon.json
+
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io \
   docker-buildx-plugin docker-compose-plugin

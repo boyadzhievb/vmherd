@@ -4,14 +4,9 @@
 # Three VMs (redis, backend, frontend) communicating over a private network.
 # Uses avahi/mDNS for inter-VM service discovery (redis.local, backend.local).
 #
-# Test steps:
-#   mkdir -p redis/terramino-go backend/terramino-go frontend/terramino-go
-#   vmherd up
-#   curl http://localhost:8081            (frontend via nginx)
-#   curl http://localhost:8080/api/scores (backend API)
-#   vmherd ssh backend
-#   vmherd status
-#   vmherd destroy
+# Run by test/e2e TestAcceptanceScenarios (VMHERD_E2E_SCENARIOS=1), see
+# test/e2e/scenarios_test.go. Manual steps: vmherd up, then open
+# http://localhost:8081
 
 images:
   ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
@@ -41,6 +36,7 @@ vms:
         inline: |
           cd /home/vagrant/terramino-go
           docker compose up -d redis
+          docker update --restart unless-stopped $(docker compose ps -q redis)
 
   - name: backend
     image: ubuntu:noble
@@ -71,7 +67,8 @@ vms:
             sleep 2
           done
           docker build -f Dockerfile.backend -t backend .
-          docker run -d -p 8080:8080 \
+          docker rm -f backend 2>/dev/null || true
+          docker run -d --name backend --restart unless-stopped -p 8080:8080 \
             -e REDIS_HOST=redis.local \
             -e REDIS_PORT=6379 \
             -e TERRAMINO_PORT=8080 \
@@ -113,7 +110,8 @@ vms:
             sleep 2
           done
           docker build -f Dockerfile.frontend -t frontend .
-          docker run -d -p 8081:8081 \
+          docker rm -f frontend 2>/dev/null || true
+          docker run -d --name frontend --restart unless-stopped -p 8081:8081 \
             --add-host backend.local:${BACKEND_IP} \
             frontend
 

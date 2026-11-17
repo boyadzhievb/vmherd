@@ -1,15 +1,9 @@
 # Herdfile — Terramino single-VM acceptance test
 # Equivalent of hashicorp-education/learn-vagrant-get-started 3.Vagrantfile
 #
-# Test steps:
-#   mkdir -p terramino-go
-#   vmherd up
-#   curl http://localhost:8081            (frontend)
-#   curl http://localhost:8080/api/scores (backend API)
-#   vmherd ssh terramino
-#   vmherd provision                      (rerun provisioning)
-#   vmherd down && vmherd up              (stop/restart without data loss)
-#   vmherd destroy
+# Run by test/e2e TestAcceptanceScenarios (VMHERD_E2E_SCENARIOS=1), see
+# test/e2e/scenarios_test.go. Manual steps: vmherd up, then open
+# http://localhost:8081
 
 images:
   ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
@@ -41,6 +35,7 @@ vms:
         inline: |
           cd /home/vagrant/terramino-go
           docker compose up -d
+          docker update --restart unless-stopped $(docker compose ps -q)
 
 network:
   name: vmherd-terramino-single
