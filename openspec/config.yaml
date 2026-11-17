@@ -26,7 +26,7 @@ rules:
   tasks:
     - The first tasks write the tests named in the spec scenarios and record how each fails before the fix
     - The last tasks are gofmt, golangci-lint, go test ./..., an e2e or testbed run on .71, an independent review, and ticking the milestone.md item with its Result note
-    - tasks.md is the item's checklist: each task's result is recorded on its own line with the date (failing output first, deviations, testbed results or "not run" and why, review findings as fixed or rejected); milestone.md only links the change
+    - 'tasks.md is the item''s checklist: each task''s result is recorded on its own line with the date (failing output first, deviations, testbed results or "not run" and why, review findings as fixed or rejected); milestone.md only links the change'
 
 operations:
   apply:
