@@ -19,7 +19,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 20 | 20 |
+| M1 | Correctness of existing features | 21 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 10 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
@@ -327,6 +327,14 @@ Note: the default network name collision is handled under M1.2.
   - **Fix:** a second SSH command greps the whole output log for the two markers (`cloudinit.FailureMarkerSearchCommand`, run with sudo; grep exit 1 = no markers, higher = the search failed and is reported). The step and 9p summaries come from those lines plus the tail; the tail is still shown for context. The missing-9p message and README name Debian's cloud kernel. The e2e table expects no 9p for Debian, and checks that the `fixed` VM's first boot succeeds wherever 9p exists (the first run didn't catch Debian's share failure in `up` for that reason).
   - **Done when:** a unit test runs the search command on a log with the markers 50 lines before its end and on a clean log; the full e2e table on .71 names the failed step on every distro and reports no 9p on Debian, Rocky and Alma.
   - **Result (2026-11-11):** `TestFailureMarkerSearchFindsLinesOutsideTheTail` runs the generated command with `sh` on a log with both markers followed by 50 lines (finds both, not the "running step" line) and on a clean log (exit 1). Second full e2e run on .71 (`e2e-full2.log`): all 8 distros pass, each `up` names `vmherd: provisioning step 2 of 2`, and Debian, Rocky and Alma report the missing 9p.
+
+- [ ] **M1.21 — `up` doesn't check that a share's host folder exists** · Med
+  - **Files:** `internal/config/sharedpath.go`, `cmd/vmherd/` (VM creation), `internal/vm/vm.go` (error hint)
+  - **Found by:** M6.9 task 2.5 on m4800 (2026-11-17). A fresh copy of the Terramino single scenario without its `terramino-go/` folder.
+  - **Problem:** Config resolves share host paths that don't exist yet on purpose (`resolveSymlinksAllowMissing`), but nothing checks them later. `up` defines the domain, and QEMU fails with `cannot initialize fsdev 'fsdev-fs0': failed to open '…/terramino-go': No such file or directory`. vmherd adds `virsh start failed: exit status 1 — check that libvirtd is running and you have permission`, which points at the wrong thing.
+  - **How Vagrant does it:** before booting it refuses with "The host path of the shared folder is missing: <path>", unless the folder has `create: true`, in which case it creates it.
+  - **Fix:** before any domain is defined, `up` (and `reload`) check every share's host path. A missing path fails with its VM, host path and recovery hint (create the folder, or remove the share), and no domain or disk is left behind. Whether to also offer Vagrant's `create: true` is decided in the proposal.
+  - **Done when:** a unit test, written first, fails on today's code for a missing share folder. `up` on m4800 with a missing share folder exits non-zero, names the folder, and leaves no domain behind.
 
 ---
 
