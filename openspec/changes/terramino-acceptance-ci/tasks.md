@@ -94,7 +94,8 @@
     - M3 verified, with a limit: `kill -9` of the single subtest during down + up left 1 domain and no port holder; the rerun removed the domain, disk, seed and network first, then passed in 237 s, leaving nothing. A stale tunnel still holding a port (lead-developer's doubt 1) did not occur, so it was not tested.
     - Found: the copy's redis VM failed `apt-get install` with `zstd error: Data corruption detected` in `git_2.43.0-1ubuntu7.4_amd64.deb`, which apt had hash-checked on download. That points at disk or memory on m4800 or in the guest; seen once in about 10 boots. Watch for it; not an M6.9 item.
     - CI check of the rework (2026-11-18): dispatch `scenarios=true` on `42d34c4` (includes 5e41a6b), y510p, [run 44274070481](https://github.com/boyadzhievb/vmherd/actions/runs/44274070481): `--- PASS: TestAcceptanceScenarios (1586.11s)`, single 610.17 s, multi 975.94 s. Push CI on 5e41a6b and 42d34c4 green.
-- [ ] 4.3 Tick M6.9 in milestone.md and add its Result note: the failing runs from 1.1, 1.3 and 2.2, the fixes, the .71 results and durations, the negative check, and any new items filed. Update the Progress table (M6 done count) in the same commit.
+- [x] 4.3 Tick M6.9 in milestone.md and add its Result note: the failing runs from 1.1, 1.3 and 2.2, the fixes, the .71 results and durations, the negative check, and any new items filed. Update the Progress table (M6 done count) in the same commit.
+  - 2026-11-18, main session: first nightly with scenarios, [run 44278611706](https://github.com/boyadzhievb/vmherd/actions/runs/44278611706) on 42d34c4, y510p: `--- PASS: TestAcceptanceScenarios (1565.22s)` (single 636.22 s, multi 929.00 s) and `--- PASS: TestDistroLifecycle (963.78s)`, all 8 distros. M6.9 ticked with its Result note; M6 done count 1 → 2. PR skip message: no pull request has run since 3.1; the push run (44140161373) logged the skip, which uses the same empty-value branch.
 
 ## Workflow follow-up
 

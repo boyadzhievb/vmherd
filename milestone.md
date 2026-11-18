@@ -24,7 +24,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M3 | Supply chain, SSH trust, CI | 11 | 0 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
-| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 1 |
+| M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 2 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
 
 ---
@@ -721,7 +721,7 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
   - **On .71:** first full run found M1.20 (5 distros) and Debian's missing 9p; after the fix all 8 pass in 14.6 min (58 s Debian … 196 s Arch). A build with Rocky wrongly marked as having 9p (via `go test -overlay`, working tree untouched) fails with "unexpected missing-9p report" and "the fixed VM's first boot should succeed", and its cleanup leaves no domain, network or disk. The first full run on the CI runner itself is the push to main.
   - **Run it yourself:** `go test -tags integration -run TestDistroLifecycle -v ./test/e2e/` on a libvirt host with passwordless sudo; add `VMHERD_E2E_IMAGES=ubuntu:noble` for one distro (~3 min). Ubuntu images must already be cached while cloud-images.ubuntu.com is unreachable.
 
-- [ ] **M6.9 — Run the Terramino acceptance scenarios in CI** · Med
+- [x] **M6.9 — Run the Terramino acceptance scenarios in CI** · Med
   - **Depends on:** M6.4 (e2e harness)
   - **OpenSpec change:** [`terramino-acceptance-ci`](openspec/changes/terramino-acceptance-ci/) (checklist and results in its `tasks.md`).
   - **Files:** `test/acceptance/terramino-single/`, `test/acceptance/terramino-multi/`, `test/e2e/` (new scenario test), `.github/workflows/integration.yml`
@@ -733,6 +733,7 @@ Source: an outside adoption checklist (image updates, reproducibility, snapshots
     - The comments in the Herdfiles become a short pointer to the test, so the steps live in one place.
     - The scenarios download packages inside the guests, so they need internet and take longer: they run nightly and on manual dispatch only (a `VMHERD_E2E_SCENARIOS` switch), not on pull requests or pushes.
   - **Done when:** both scenarios pass nightly on the runner; a broken provisioning script in a copy makes the run fail on the HTTP check, naming the port.
+  - **Result (2026-11-18):** `TestAcceptanceScenarios` (`test/e2e/scenarios_test.go`) runs both Terramino scenarios nightly and on dispatch (`scenarios` input), skipped on pushes and PRs. Before the fix both failed at `up` on libvirt's `default` subnet; they now use 192.168.240/241.0/24. The scenario scripts needed fixes, none in vmherd: Docker 29's containerd image store can't extract a `golang:1.22` layer (scripts set `containerd-snapshotter: false`), multi had to become rerunnable (`docker rm -f`, `gpg --batch --yes`, `safe.directory`) and both needed restart policies to survive `down` + `up`. Review rework: `8081/score` checks the frontend→backend proxy, boot_id proves `down` really stopped the VMs, leftovers are removed before the port check, and a network another project uses is never removed. Negative check: without its `docker compose up` step, single fails in `checkForwardedPorts` naming port 8081. Found and filed: M1.21 (a missing share host folder fails with a misleading `virsh start` error). Durations: m4800 10 min; y510p 25–26 min for the scenarios, about 41 min for the whole job. First green nightly with scenarios: [run 44278611706](https://github.com/boyadzhievb/vmherd/actions/runs/44278611706) (single 636 s, multi 929 s, distro table 964 s).
 
 ### Phase 6C — Configuration changes
 
