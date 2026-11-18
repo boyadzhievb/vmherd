@@ -19,10 +19,10 @@ This is a remediation plan, separate from the product roadmap milestones.
 | Milestone | Theme | Items | Done |
 |---|---|---|---|
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
-| M1 | Correctness of existing features | 21 | 20 |
+| M1 | Correctness of existing features | 21 | 21 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
 | M3 | Supply chain, SSH trust, CI | 11 | 1 |
-| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
+| M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 3 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 2 |
 | M7 | Environment integrations: ssh-config, names, Ansible inventory, templates, Dev Containers | 6 | 0 |
@@ -328,7 +328,7 @@ Note: the default network name collision is handled under M1.2.
   - **Done when:** a unit test runs the search command on a log with the markers 50 lines before its end and on a clean log; the full e2e table on .71 names the failed step on every distro and reports no 9p on Debian, Rocky and Alma.
   - **Result (2026-11-11):** `TestFailureMarkerSearchFindsLinesOutsideTheTail` runs the generated command with `sh` on a log with both markers followed by 50 lines (finds both, not the "running step" line) and on a clean log (exit 1). Second full e2e run on .71 (`e2e-full2.log`): all 8 distros pass, each `up` names `vmherd: provisioning step 2 of 2`, and Debian, Rocky and Alma report the missing 9p.
 
-- [ ] **M1.21 — `up` doesn't check that a share's host folder exists** · Med
+- [x] **M1.21 — `up` doesn't check that a share's host folder exists** · Med
   - **OpenSpec change:** [`share-host-folder-check`](openspec/changes/share-host-folder-check/) (checklist and results in its `tasks.md`). Decision (2026-11-18, user): check only, no Vagrant-style `create: true`.
   - **Files:** `internal/config/sharedpath.go`, `cmd/vmherd/` (VM creation), `internal/vm/vm.go` (error hint)
   - **Found by:** M6.9 task 2.5 on m4800 (2026-11-17). A fresh copy of the Terramino single scenario without its `terramino-go/` folder.
@@ -336,6 +336,7 @@ Note: the default network name collision is handled under M1.2.
   - **How Vagrant does it:** before booting it refuses with "The host path of the shared folder is missing: <path>", unless the folder has `create: true`, in which case it creates it.
   - **Fix:** before any domain is defined, `up` (and `reload`) check every share's host path. A missing path fails with its VM, host path and recovery hint (create the folder, or remove the share), and no domain or disk is left behind. Whether to also offer Vagrant's `create: true` is decided in the proposal.
   - **Done when:** a unit test, written first, fails on today's code for a missing share folder. `up` on m4800 with a missing share folder exits non-zero, names the folder, and leaves no domain behind.
+  - **Result (2026-11-18):** `up` (right after picking the VMs), `reload` (before destroying) and `restart` (before stopping; found in review, it used to leave a running VM stopped) run `config.CheckSharedFolderHostPathsExist` and exit 1 naming each VM, the `host` value, the resolved path and a shell-quoted `mkdir -p` hint; a dangling symlink on the path is named instead. Every problem is listed at once; loading still accepts a missing folder. No `create: true` (user's choice), otherwise as Vagrant. Test first: `TestCheckSharedFolderHostPathsExist` failed to compile, its symlink and quoting rows failed on the first version, and `TestCheckReloadPrerequisitesStopsWhenShareFolderMissing` against the old `reload.go` tried to download the image and named no folder. New e2e `TestUpRefusesMissingShareFolder` passed in CI ([run 44346368121](https://github.com/boyadzhievb/vmherd/actions/runs/44346368121), 0.11 s, nothing created).
 
 ---
 
@@ -564,7 +565,7 @@ Note: the default network name collision is handled under M1.2.
   - **Fix:** Move it to `docs/reviews/archive/`, or delete it once this file supersedes it. Keep `checklist.md` only if it's updated to match CLAUDE.md.
   - **Done when:** `reviews/` contains no stale status claims.
 
-- [ ] **M4.7 — Write the test first (rule in CLAUDE.md)** · Med
+- [x] **M4.7 — Write the test first (rule in CLAUDE.md)** · Med
   - **Files:** `CLAUDE.md` (Development Workflow), this file's "How to use" section
   - **Problem:** Tests have been written after the fix, in the same commit (reproduce on the testbed → fix → regression test). That catches regressions, but nothing proves the test fails without the fix, and feature items describe their tests only loosely. Coverage is high where logic is pure (config 88%, cloudinit 84%) and low where the bugs were (`cmd/vmherd` 4%), because command code calls `virsh`, `sudo` and `ssh` directly.
   - **Rule to add:**
@@ -574,6 +575,7 @@ Note: the default network name collision is handled under M1.2.
     - Where `cmd/` code can't be tested yet, the item says so and points at M2.3, instead of skipping the test silently.
   - **Done when:** CLAUDE.md's Development Workflow and "How to use this file" carry the rule, and the next bug fix after it follows it.
   - **Status (2026-11-12):** The rule is in CLAUDE.md (Development Workflow, item 7) and in "How to use this file". The checkbox gets ticked when the next bug fix follows the rule; its result note names this item.
+  - **Result (2026-11-18):** M1.21 is the first bug fix to follow the rule end to end: its unit tests were written and run red before the fix (results on the tasks' lines in `openspec/changes/share-host-folder-check/tasks.md`), and an e2e case covers the command path that `cmd/` tests can't reach yet.
 
 - [x] **M4.8 — Specs and changes with OpenSpec** · Med
   - **Files:** `openspec/` (config, specs), `.claude/skills/openspec-*`, `.claude/commands/opsx/`, `CLAUDE.md` (Development Workflow item 8, Project Structure), this file's "How to use" section
