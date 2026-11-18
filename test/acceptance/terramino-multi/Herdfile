@@ -7,7 +7,6 @@
 # Run by test/e2e TestAcceptanceScenarios (VMHERD_E2E_SCENARIOS=1), see
 # test/e2e/scenarios_test.go. Manual steps:
 #   mkdir -p redis/terramino-go backend/terramino-go frontend/terramino-go
-#                             (needed until M1.21: up fails on a missing share folder)
 #   vmherd up
 #   open http://localhost:8081
 

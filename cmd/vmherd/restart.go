@@ -11,6 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// restartUnchangedNote ends the error of restart's prerequisite check, which
+// runs before any VM is stopped.
+const restartUnchangedNote = "\n\nrestart stopped before stopping any VM — every VM is still in its previous state"
+
 // newRestartCmd creates the 'restart' command that stops and starts VMs.
 func newRestartCmd() *cobra.Command {
 	return &cobra.Command{
@@ -34,6 +38,10 @@ Examples:
 				return err
 			}
 
+			if err := checkRestartPrerequisites(vmsToRestart); err != nil {
+				return err
+			}
+
 			keyPath, err := ssh.EnsureKeyPair(project.StateDir, "vmherd-"+project.Name)
 			if err != nil {
 				return err
@@ -53,6 +61,16 @@ Examples:
 			return nil
 		},
 	}
+}
+
+// checkRestartPrerequisites checks every share's host folder before restart
+// stops anything, so a running VM is never stopped only to fail to start
+// again on a missing folder (M1.21).
+func checkRestartPrerequisites(vmsToRestart []config.VM) error {
+	if err := config.CheckSharedFolderHostPathsExist(vmsToRestart); err != nil {
+		return fmt.Errorf("%w%s", err, restartUnchangedNote)
+	}
+	return nil
 }
 
 // stopAndStartVMs gracefully stops powered-on VMs (in parallel, forcing only

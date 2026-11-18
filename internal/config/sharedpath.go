@@ -142,3 +142,93 @@ func resolveSharedFolderHostPath(hostPath, projectDir string, allowOutsideHome b
 	}
 	return resolvedHostPath, nil
 }
+
+// CheckSharedFolderHostPathsExist checks that every share's resolved host path
+// of the given VMs exists and is a directory. Loading accepts missing folders,
+// so up and reload call this before changing anything. Every problem, in
+// Herdfile order, is returned at once.
+func CheckSharedFolderHostPathsExist(vms []VM) error {
+	var problems []error
+	for _, vmConfig := range vms {
+		for _, sharedFolder := range vmConfig.SharedFolders {
+			if err := checkSharedFolderHostPathExists(vmConfig.Name, sharedFolder); err != nil {
+				problems = append(problems, err)
+			}
+		}
+	}
+	return errors.Join(problems...)
+}
+
+// checkSharedFolderHostPathExists reports why one share's host path can't be
+// shared: it is missing (or behind a dangling symlink), not a directory, or
+// can't be inspected.
+func checkSharedFolderHostPathExists(vmName string, sharedFolder SharedFolder) error {
+	resolvedHostPath := sharedFolder.ResolvedHost
+	fileInfo, err := os.Stat(resolvedHostPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return missingHostPathError(vmName, sharedFolder)
+	case err != nil:
+		return fmt.Errorf("VM %q: shared folder host path %q (%s) cannot be checked: %w — "+
+			"fix its permissions or remove the share from the Herdfile", vmName, sharedFolder.Host, resolvedHostPath, err)
+	case !fileInfo.IsDir():
+		return fmt.Errorf("VM %q: shared folder host path %q (%s) is not a directory — 9p shares a folder; "+
+			"point 'host' at a folder or remove the share", vmName, sharedFolder.Host, resolvedHostPath)
+	}
+	return nil
+}
+
+// missingHostPathError explains a share host path that doesn't exist: a
+// dangling symlink on the path needs its target, anything else 'mkdir -p'.
+func missingHostPathError(vmName string, sharedFolder SharedFolder) error {
+	resolvedHostPath := sharedFolder.ResolvedHost
+	linkPath, linkTarget, isDangling := findDanglingSymlink(resolvedHostPath)
+	if !isDangling {
+		return fmt.Errorf("VM %q: shared folder host path %q (%s) does not exist — create it with mkdir -p %s "+
+			"or remove the share from the Herdfile", vmName, sharedFolder.Host, resolvedHostPath, shellQuote(resolvedHostPath))
+	}
+	if linkPath == resolvedHostPath {
+		return fmt.Errorf("VM %q: shared folder host path %q (%s) is a symlink to missing %s — "+
+			"create the target or fix the link", vmName, sharedFolder.Host, resolvedHostPath, linkTarget)
+	}
+	return fmt.Errorf("VM %q: shared folder host path %q (%s) does not exist: %s is a symlink to missing %s — "+
+		"create the target or fix the link", vmName, sharedFolder.Host, resolvedHostPath, linkPath, linkTarget)
+}
+
+// findDanglingSymlink walks from missingPath up to the deepest element that
+// exists (os.Lstat) and reports it when it is a symlink whose target is
+// missing. A relative link target is returned as an absolute path. If the
+// link can't be read, it reports no dangling link (the plain mkdir hint).
+func findDanglingSymlink(missingPath string) (linkPath, linkTarget string, isDangling bool) {
+	candidatePath := filepath.Clean(missingPath)
+	for {
+		fileInfo, err := os.Lstat(candidatePath)
+		if err == nil {
+			if fileInfo.Mode()&fs.ModeSymlink == 0 {
+				return "", "", false
+			}
+			if _, statErr := os.Stat(candidatePath); !errors.Is(statErr, fs.ErrNotExist) {
+				return "", "", false
+			}
+			target, readErr := os.Readlink(candidatePath)
+			if readErr != nil {
+				return "", "", false
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(candidatePath), target)
+			}
+			return candidatePath, target, true
+		}
+		parentPath := filepath.Dir(candidatePath)
+		if parentPath == candidatePath {
+			return "", "", false
+		}
+		candidatePath = parentPath
+	}
+}
+
+// shellQuote single-quotes a path for a shell command shown to the user,
+// ending the quote around each embedded single quote: close, escaped quote, reopen.
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}

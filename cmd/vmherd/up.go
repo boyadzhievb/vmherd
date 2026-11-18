@@ -44,6 +44,11 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
+			// A missing share folder fails before anything is created (M1.21).
+			if err := config.CheckSharedFolderHostPathsExist(vms); err != nil {
+				return err
+			}
+
 			gatewayIP, err := project.GatewayIP()
 			if err != nil {
 				return err

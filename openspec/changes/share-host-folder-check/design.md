@@ -14,11 +14,12 @@
 
 ## Decisions
 
-1. **One pure check in `internal/config`:** `CheckSharedFolderHostPathsExist(vms []VM) error`. For each VM in order, and each share in order, it calls `os.Stat(ResolvedHost)`. Not existing → "VM %q: shared folder host path %q (%s) does not exist — create it with 'mkdir -p %s' or remove the share from the Herdfile". Not a directory → "VM %q: shared folder host path %q (%s) is not a directory — 9p shares a folder; point 'host' at a folder or remove the share". Any other stat error (e.g. permission denied) is wrapped with the path. All problems are joined with `errors.Join`, matching load's "every problem at once". The check lives in config because it only reads the parsed shares, and it needs no libvirt, so it is unit-tested without M2.3.
+1. **One pure check in `internal/config`:** `CheckSharedFolderHostPathsExist(vms []VM) error`. For each VM in order, and each share in order, it calls `os.Stat(ResolvedHost)`. Not existing → "VM %q: shared folder host path %q (%s) does not exist — create it with mkdir -p '%s' or remove the share from the Herdfile" (path single-quoted, `'` escaped as `'\''`; review L3, 2026-11-18). If `os.Lstat`, walking up from the resolved path, finds that the deepest existing element is a symlink with a missing target, the error instead says "… is a symlink to missing <target> — create the target or fix the link" (for a symlinked parent: "does not exist: <link> is a symlink to missing <target> — …"), without the `mkdir -p` hint, which would not help (review L2, 2026-11-18). Not a directory → "VM %q: shared folder host path %q (%s) is not a directory — 9p shares a folder; point 'host' at a folder or remove the share". Any other stat error (e.g. permission denied) is wrapped with the path. All problems are joined with `errors.Join`, matching load's "every problem at once". The check lives in config because it only reads the parsed shares, and it needs no libvirt, so it is unit-tested without M2.3.
    - *Alternative rejected:* checking in `validateSharedFolders` at load time. That would break `destroy` and `status` on a project whose folder was deleted.
 2. **`up` calls it right after `FilterVMs`**, before the gateway lookup, the key pair and the network. It covers every selected VM, including ones that already exist or are running. A stopped VM with a deleted folder would fail to start the same way, and a running one has a share that no longer exists on the host. Checking all of them keeps the rule simple: `up` never touches anything while a selected VM's folder is missing.
 3. **`reload` calls it at the start of `checkReloadPrerequisites`**, before the image downloads. It fails fast, and its error gets the same "reload stopped before changing any VM" suffix as the other prerequisite errors.
-4. **Output.** The error goes through the existing command error path, so it is printed once and the exit code is 1. Errors on the Herdfile path use the `host` value as written, and the resolved path is added in parentheses, so a `../shared` share is still recognisable.
+4. **`restart` calls it before anything is stopped** (review M1, 2026-11-18, option a): `checkRestartPrerequisites` runs right after `FilterVMs`, before the key pair and `stopAndStartVMs`. Without it, restart stops a running VM and then `vm.Start` fails in QEMU, so the VM stays stopped. Its error ends with "restart stopped before stopping any VM — every VM is still in its previous state". The small function exists so the check is unit-tested like `checkReloadPrerequisites`.
+5. **Output.** The error goes through the existing command error path, so it is printed once and the exit code is 1. Errors on the Herdfile path use the `host` value as written, and the resolved path is added in parentheses, so a `../shared` share is still recognisable.
 
 ## Failure cases
 
@@ -28,6 +29,8 @@
 | Several VMs, several missing | One error lists every missing folder in Herdfile order; nothing changes for any VM |
 | `up web` with `db`'s folder missing | Passes: only the selected VMs are checked |
 | Host path is a file | Fails with "is not a directory" |
+| Share or a parent is a symlink to a missing target | Fails naming the link and its missing target; no `mkdir -p` hint |
+| `restart` with a folder missing | Exit 1 before any VM is stopped; running VMs keep running |
 | Folder unreadable (stat permission error) | Fails naming the path and the OS error |
 | Folder deleted after the check, before boot | QEMU's error as today (race, accepted) |
 | `status`, `destroy`, `down`, `ssh` with a missing folder | Unchanged: load accepts it |

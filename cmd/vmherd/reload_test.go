@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,5 +36,31 @@ func TestCheckReloadPrerequisitesStopsWhenImageUnavailable(t *testing.T) {
 				t.Errorf("error should say no VM was changed, got: %v", err)
 			}
 		})
+	}
+}
+
+// TestCheckReloadPrerequisitesStopsWhenShareFolderMissing checks that reload's
+// pre-check names a missing share folder and says nothing was changed, before
+// it downloads any image (the unreachable URL would fail otherwise).
+func TestCheckReloadPrerequisitesStopsWhenShareFolderMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	missingFolder := filepath.Join(t.TempDir(), "terramino-go")
+	vmsToReload := []config.VM{{
+		Name:          "ctrl",
+		Image:         "ubuntu:noble",
+		SharedFolders: []config.SharedFolder{{Host: "./terramino-go", Guest: "/app", ResolvedHost: missingFolder}},
+	}}
+
+	resolvedImages, err := checkReloadPrerequisites(vmsToReload, map[string]string{"ubuntu:noble": unreachableImageURL})
+	if err == nil {
+		t.Fatalf("expected an error, got resolved images %v", resolvedImages)
+	}
+	for _, wantFragment := range []string{"./terramino-go", "mkdir -p '" + missingFolder + "'", "reload stopped before changing any VM"} {
+		if !strings.Contains(err.Error(), wantFragment) {
+			t.Errorf("error should contain %q, got: %v", wantFragment, err)
+		}
+	}
+	if strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Errorf("the share check should fail before any image download, got: %v", err)
 	}
 }

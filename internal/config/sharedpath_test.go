@@ -133,3 +133,150 @@ network:
 		t.Errorf("ResolvedHost[1] = %q, want %q", got, want)
 	}
 }
+
+// TestCheckSharedFolderHostPathsExist checks that up's and reload's share
+// check reports a missing folder, a file, a dangling symlink (the share or a
+// parent) with a fitting hint, every problem in Herdfile order, and passes
+// when all folders exist or there are no shares.
+func TestCheckSharedFolderHostPathsExist(t *testing.T) {
+	baseDir := t.TempDir()
+	presentDir := filepath.Join(baseDir, "present")
+	missingDir := filepath.Join(baseDir, "terramino-go")
+	otherMissingDir := filepath.Join(baseDir, "other-missing")
+	spacedMissingDir := filepath.Join(baseDir, "it's my folder")
+	regularFile := filepath.Join(baseDir, "a-file")
+	missingLinkTarget := filepath.Join(baseDir, "gone")
+	danglingLink := filepath.Join(baseDir, "link")
+	danglingParentLink := filepath.Join(baseDir, "parent-link")
+	if err := os.MkdirAll(presentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(regularFile, []byte("not a folder"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, linkPath := range []string{danglingLink, danglingParentLink} {
+		if err := os.Symlink(missingLinkTarget, linkPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shareOf := func(hostPath, resolvedHostPath string) SharedFolder {
+		return SharedFolder{Host: hostPath, Guest: "/share", ResolvedHost: resolvedHostPath}
+	}
+	testCases := []struct {
+		name              string   // description of the case
+		vms               []VM     // the VMs to check
+		wantErrSubstrings []string // fragments the error must contain, in this order (none = pass)
+		unwantedFragments []string // fragments the error must not contain
+	}{
+		{
+			name: "missing",
+			vms:  []VM{{Name: "web", SharedFolders: []SharedFolder{shareOf("./terramino-go", missingDir)}}},
+			wantErrSubstrings: []string{`VM "web"`, `"./terramino-go"`, missingDir, "does not exist",
+				"mkdir -p '" + missingDir + "'", "remove the share from the Herdfile"},
+		},
+		{
+			name: "missing with space and quote",
+			vms:  []VM{{Name: "web", SharedFolders: []SharedFolder{shareOf("./it's my folder", spacedMissingDir)}}},
+			wantErrSubstrings: []string{`VM "web"`, "does not exist",
+				"mkdir -p '" + strings.ReplaceAll(spacedMissingDir, "'", `'\''`) + "'"},
+		},
+		{
+			name: "dangling symlink",
+			vms:  []VM{{Name: "web", SharedFolders: []SharedFolder{shareOf("./link", danglingLink)}}},
+			wantErrSubstrings: []string{`VM "web"`, `"./link"`, danglingLink, "is a symlink to missing " + missingLinkTarget,
+				"create the target or fix the link"},
+			unwantedFragments: []string{"mkdir -p"},
+		},
+		{
+			name: "dangling symlinked parent",
+			vms: []VM{{Name: "web", SharedFolders: []SharedFolder{
+				shareOf("./parent-link/src", filepath.Join(danglingParentLink, "src"))}}},
+			wantErrSubstrings: []string{`VM "web"`, `"./parent-link/src"`, danglingParentLink,
+				"is a symlink to missing " + missingLinkTarget, "create the target or fix the link"},
+			unwantedFragments: []string{"mkdir -p"},
+		},
+		{
+			name:              "file",
+			vms:               []VM{{Name: "web", SharedFolders: []SharedFolder{shareOf("./a-file", regularFile)}}},
+			wantErrSubstrings: []string{`VM "web"`, `"./a-file"`, regularFile, "is not a directory"},
+		},
+		{
+			name: "two VMs",
+			vms: []VM{
+				{Name: "first", SharedFolders: []SharedFolder{shareOf("./terramino-go", missingDir)}},
+				{Name: "second", SharedFolders: []SharedFolder{shareOf("./present", presentDir), shareOf("./other-missing", otherMissingDir)}},
+			},
+			wantErrSubstrings: []string{`VM "first"`, "mkdir -p '" + missingDir + "'", `VM "second"`, "mkdir -p '" + otherMissingDir + "'"},
+		},
+		{
+			name: "present",
+			vms:  []VM{{Name: "web", SharedFolders: []SharedFolder{shareOf(".", baseDir), shareOf("./present", presentDir)}}},
+		},
+		{
+			name: "no shares",
+			vms:  []VM{{Name: "web", SharedFolders: []SharedFolder{}}, {Name: "db"}},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := CheckSharedFolderHostPathsExist(testCase.vms)
+			if len(testCase.wantErrSubstrings) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected an error containing %q, got nil", testCase.wantErrSubstrings)
+			}
+			remainingMessage := err.Error()
+			for _, wantSubstring := range testCase.wantErrSubstrings {
+				position := strings.Index(remainingMessage, wantSubstring)
+				if position < 0 {
+					t.Fatalf("error should contain %q (in this order), got: %v", wantSubstring, err)
+				}
+				remainingMessage = remainingMessage[position+len(wantSubstring):]
+			}
+			for _, unwantedFragment := range testCase.unwantedFragments {
+				if strings.Contains(err.Error(), unwantedFragment) {
+					t.Errorf("error should not contain %q, got: %v", unwantedFragment, err)
+				}
+			}
+		})
+	}
+}
+
+// TestLoadAcceptsMissingShareFolder checks that loading still accepts a share
+// whose host folder doesn't exist, so status, destroy, down and ssh keep
+// working after the folder is deleted; only up, reload and restart refuse it.
+func TestLoadAcceptsMissingShareFolder(t *testing.T) {
+	fixture := newSharedPathFixture(t)
+	herdfileContent := `
+images:
+  ubuntu:noble: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+vms:
+  - name: web
+    image: ubuntu:noble
+    shared_folders:
+      - host: ./terramino-go
+        guest: /app
+network:
+  name: test-net
+  subnet: 192.168.122.0/24
+`
+	if err := os.WriteFile(filepath.Join(fixture.projectDir, HerdfileName), []byte(herdfileContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missingFolder := filepath.Join(fixture.projectDir, "terramino-go")
+	if _, err := os.Stat(missingFolder); !os.IsNotExist(err) {
+		t.Fatalf("test setup: %s should not exist, stat error: %v", missingFolder, err)
+	}
+	herdfile, err := Load(fixture.projectDir)
+	if err != nil {
+		t.Fatalf("a missing share folder must not fail loading (status, destroy, down and ssh rely on it): %v", err)
+	}
+	if got := herdfile.VMs[0].SharedFolders[0].ResolvedHost; got != missingFolder {
+		t.Errorf("ResolvedHost = %q, want %q", got, missingFolder)
+	}
+}

@@ -1,12 +1,17 @@
 ## ADDED Requirements
 
 ### Requirement: Host folders must exist before VMs are created or started
-Before `vmherd up` creates or starts anything and before `vmherd reload` destroys anything, vmherd SHALL check that every share's host path of the selected VMs exists and is a directory. If any doesn't, the command SHALL exit 1 naming each VM, host path and resolved path with how to fix it, and SHALL leave no new SSH key, network, disk or domain behind. Loading the Herdfile SHALL still accept a missing folder.
+Before `vmherd up` creates or starts anything, before `vmherd reload` destroys anything and before `vmherd restart` stops anything, vmherd SHALL check that every share's host path of the selected VMs exists and is a directory. If any doesn't, the command SHALL exit 1 naming each VM, host path and resolved path with how to fix it, and SHALL leave no new SSH key, network, disk or domain behind. Loading the Herdfile SHALL still accept a missing folder.
 
 #### Scenario: Missing folder
 - **WHEN** a VM shares `./terramino-go` and that folder doesn't exist
-- **THEN** the check fails naming the VM, `./terramino-go`, its resolved path, and says to run `mkdir -p <resolved path>` or remove the share from the Herdfile
-- **Test:** internal/config/TestCheckSharedFolderHostPathsExist (missing)
+- **THEN** the check fails naming the VM, `./terramino-go`, its resolved path, and says to run `mkdir -p '<resolved path>'` (single-quoted, `'` escaped) or remove the share from the Herdfile
+- **Test:** internal/config/TestCheckSharedFolderHostPathsExist (missing, missing with space and quote)
+
+#### Scenario: Dangling symlink
+- **WHEN** a share's host path, or one of its parents, is a symlink whose target doesn't exist
+- **THEN** the check fails naming the VM, the path, the link and its missing target, and says to create the target or fix the link, without a `mkdir -p` hint
+- **Test:** internal/config/TestCheckSharedFolderHostPathsExist (dangling symlink, dangling symlinked parent)
 
 #### Scenario: Path is a file
 - **WHEN** a share's host path exists but is a regular file
@@ -31,7 +36,12 @@ Before `vmherd up` creates or starts anything and before `vmherd reload` destroy
 #### Scenario: reload changes nothing
 - **WHEN** the user runs `vmherd reload` for a VM whose share folder was deleted after it was created
 - **THEN** it exits 1 naming the folder before destroying anything, and the VM and its disk are untouched
-- **Test:** none yet — cmd/ code, needs M2.3; the check it calls is covered by internal/config/TestCheckSharedFolderHostPathsExist
+- **Test:** cmd/vmherd/TestCheckReloadPrerequisitesStopsWhenShareFolderMissing (fails before any image download); reload's RunE calls it before destroying anything
+
+#### Scenario: restart stops nothing
+- **WHEN** the user runs `vmherd restart` for a VM whose share folder was deleted
+- **THEN** it exits 1 naming the folder before stopping any VM, and running VMs keep running
+- **Test:** cmd/vmherd/TestCheckRestartPrerequisitesStopsWhenShareFolderMissing; restart's RunE calls it before stopping anything
 
 #### Scenario: Loading still accepts a missing folder
 - **WHEN** a share's host folder was deleted and the user runs `vmherd status` or `vmherd destroy`

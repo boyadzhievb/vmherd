@@ -13,6 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// reloadUnchangedNote ends every error of reload's prerequisite check, which
+// runs before any VM is changed.
+const reloadUnchangedNote = "\n\nreload stopped before changing any VM — the existing VMs and their disks are untouched"
+
 // newReloadCmd creates the 'reload' command that destroys and recreates VMs.
 func newReloadCmd() *cobra.Command {
 	return &cobra.Command{
@@ -92,21 +96,24 @@ Examples:
 	}
 }
 
-// checkReloadPrerequisites downloads and verifies every image the VMs need and
-// checks the host identity used for shared folders, before reload removes
-// anything: a VM is never destroyed when its replacement can't be created.
+// checkReloadPrerequisites checks every share's host folder, downloads and
+// verifies every image the VMs need and checks the host identity used for
+// shared folders, before reload removes anything: a VM is never destroyed
+// when its replacement can't be created.
 func checkReloadPrerequisites(vmsToReload []config.VM, images map[string]string) (map[string]resolvedImage, error) {
+	if err := config.CheckSharedFolderHostPathsExist(vmsToReload); err != nil {
+		return nil, fmt.Errorf("%w%s", err, reloadUnchangedNote)
+	}
 	resolvedImages, err := resolveAndCacheImages(vmsToReload, images)
 	if err != nil {
-		return nil, fmt.Errorf("%w\n\nreload stopped before changing any VM — the existing VMs and their disks are untouched", err)
+		return nil, fmt.Errorf("%w%s", err, reloadUnchangedNote)
 	}
 	for _, vmConfig := range vmsToReload {
 		if len(vmConfig.SharedFolders) == 0 {
 			continue
 		}
 		if _, err := vm.DetectHostIdentity(); err != nil {
-			return nil, fmt.Errorf("preparing shared folders for %s: %w\n\nreload stopped before changing any VM — "+
-				"the existing VMs and their disks are untouched", vmConfig.Name, err)
+			return nil, fmt.Errorf("preparing shared folders for %s: %w%s", vmConfig.Name, err, reloadUnchangedNote)
 		}
 		break
 	}
