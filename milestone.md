@@ -329,6 +329,7 @@ Note: the default network name collision is handled under M1.2.
   - **Result (2026-11-11):** `TestFailureMarkerSearchFindsLinesOutsideTheTail` runs the generated command with `sh` on a log with both markers followed by 50 lines (finds both, not the "running step" line) and on a clean log (exit 1). Second full e2e run on .71 (`e2e-full2.log`): all 8 distros pass, each `up` names `vmherd: provisioning step 2 of 2`, and Debian, Rocky and Alma report the missing 9p.
 
 - [ ] **M1.21 — `up` doesn't check that a share's host folder exists** · Med
+  - **OpenSpec change:** [`share-host-folder-check`](openspec/changes/share-host-folder-check/) (checklist and results in its `tasks.md`). Decision (2026-11-18, user): check only, no Vagrant-style `create: true`.
   - **Files:** `internal/config/sharedpath.go`, `cmd/vmherd/` (VM creation), `internal/vm/vm.go` (error hint)
   - **Found by:** M6.9 task 2.5 on m4800 (2026-11-17). A fresh copy of the Terramino single scenario without its `terramino-go/` folder.
   - **Problem:** Config resolves share host paths that don't exist yet on purpose (`resolveSymlinksAllowMissing`), but nothing checks them later. `up` defines the domain, and QEMU fails with `cannot initialize fsdev 'fsdev-fs0': failed to open '…/terramino-go': No such file or directory`. vmherd adds `virsh start failed: exit status 1 — check that libvirtd is running and you have permission`, which points at the wrong thing.
