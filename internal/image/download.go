@@ -97,24 +97,39 @@ func Download(entry *Entry) (string, error) {
 // the image file exists, so a stale URL is reported as such instead of as a
 // missing checksum. Servers that don't answer HEAD are not held against the URL.
 func checkImageURLAvailable(httpClient *http.Client, imageURL string) error {
-	if !strings.HasPrefix(imageURL, "https://") {
-		return fmt.Errorf("refusing to download from non-HTTPS URL: %s — all image URLs must use HTTPS", imageURL)
-	}
-	response, err := httpClient.Head(imageURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
+	statusCode, err := headImageURL(httpClient, imageURL)
 	if err != nil {
-		return fmt.Errorf("cannot reach %s: %w — check the network connection and the URL", imageURL, err)
+		return err // headImageURL's errors already name the URL and the fix
 	}
-	if closeErr := response.Body.Close(); closeErr != nil {
-		return fmt.Errorf("closing HEAD response from %s: %w", imageURL, closeErr)
-	}
-	switch response.StatusCode {
-	case http.StatusNotFound, http.StatusGone:
+	if isWithdrawnStatusCode(statusCode) {
 		directoryURL := imageURL[:strings.LastIndex(imageURL, "/")+1]
 		return fmt.Errorf("image URL %s returns HTTP %d — the vendor no longer publishes this file. "+
 			"Look up the current file name at %s and update the images: entry in your Herdfile",
-			imageURL, response.StatusCode, directoryURL)
+			imageURL, statusCode, directoryURL)
 	}
 	return nil
+}
+
+// headImageURL sends HEAD to an HTTPS image URL (redirects followed) and
+// returns the final status code.
+func headImageURL(httpClient *http.Client, imageURL string) (int, error) {
+	if !strings.HasPrefix(imageURL, "https://") {
+		return 0, fmt.Errorf("refusing to download from non-HTTPS URL: %s — all image URLs must use HTTPS", imageURL)
+	}
+	response, err := httpClient.Head(imageURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
+	if err != nil {
+		return 0, fmt.Errorf("cannot reach %s: %w — check the network connection and the URL", imageURL, err)
+	}
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return 0, fmt.Errorf("closing HEAD response from %s: %w", imageURL, closeErr)
+	}
+	return response.StatusCode, nil
+}
+
+// isWithdrawnStatusCode reports whether a vendor answer means the file is no
+// longer published under that name (HTTP 404 or 410).
+func isWithdrawnStatusCode(statusCode int) bool {
+	return statusCode == http.StatusNotFound || statusCode == http.StatusGone
 }
 
 // discoverChecksumInfo finds the checksum for an image entry. If the entry has
@@ -156,27 +171,51 @@ func discoverChecksumInfo(httpClient *http.Client, entry *Entry) (*checksumInfo,
 // the URLs of its checksum files in preference order (see
 // extractChecksumLinksFromHTML). imageFilename ranks the image's own file first.
 func scrapeChecksumURLsFromDirectory(httpClient *http.Client, baseURL, imageFilename string) ([]string, error) {
+	checksumURLs, _, err := readDirectoryChecksumLinks(httpClient, baseURL, imageFilename)
+	return checksumURLs, err
+}
+
+// readDirectoryChecksumLinks is scrapeChecksumURLsFromDirectory that also
+// returns the listing's final URL after redirects (the mirror that served it).
+func readDirectoryChecksumLinks(httpClient *http.Client, baseURL, imageFilename string) (checksumURLs []string, listingFinalURL string, err error) {
 	if !strings.HasPrefix(baseURL, "https://") {
-		return nil, fmt.Errorf("directory URL must use HTTPS: %s", baseURL)
+		return nil, "", fmt.Errorf("directory URL must use HTTPS: %s", baseURL)
 	}
 
 	resp, err := httpClient.Get(baseURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
 	if err != nil {
-		return nil, fmt.Errorf("cannot fetch directory listing: %w", err)
+		return nil, "", fmt.Errorf("cannot fetch directory listing: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching directory listing from %s", resp.StatusCode, baseURL)
+		return nil, "", fmt.Errorf("HTTP %d fetching directory listing from %s", resp.StatusCode, baseURL)
 	}
 
-	const maxDirectorySize = 1 << 20
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDirectorySize))
+	data, err := readVendorTextBody(resp.Body, baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read directory listing: %w", err)
+		return nil, "", fmt.Errorf("cannot read directory listing: %w", err)
 	}
 
-	return extractChecksumLinksFromHTML(string(data), baseURL, imageFilename), nil
+	return extractChecksumLinksFromHTML(string(data), baseURL, imageFilename), resp.Request.URL.String(), nil
+}
+
+// maxVendorTextFileSize is the most vmherd reads of a directory listing or a
+// checksum file; real ones are a few KB.
+const maxVendorTextFileSize = 1 << 20
+
+// readVendorTextBody reads a listing or checksum file body, failing rather
+// than cutting it off when it is larger than maxVendorTextFileSize.
+func readVendorTextBody(body io.Reader, sourceURL string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxVendorTextFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxVendorTextFileSize {
+		return nil, fmt.Errorf("%s is larger than %d bytes, more than any directory listing or checksum file — "+
+			"check that the URL points at the vendor's image directory", sourceURL, maxVendorTextFileSize)
+	}
+	return data, nil
 }
 
 // checksumSignatureSuffixes are detached-signature extensions; such files sit
@@ -282,46 +321,57 @@ func extractHostFromURL(rawURL string) string {
 // hash for the given filename. The algorithm is determined from three sources
 // in priority order: BSD-format line prefix, hex digest length, URL path name.
 func fetchChecksumFromURL(httpClient *http.Client, checksumURL string, filename string) (*checksumInfo, error) {
-	if !strings.HasPrefix(checksumURL, "https://") {
-		return nil, fmt.Errorf("checksum URL must use HTTPS: %s", checksumURL)
+	checksumFileContent, _, fetchError := fetchChecksumFileContent(httpClient, checksumURL)
+	if fetchError != nil {
+		return nil, fetchError
 	}
 
-	resp, err := httpClient.Get(checksumURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
-	if err != nil {
-		return nil, fmt.Errorf("cannot download checksum file: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d fetching checksum from %s", resp.StatusCode, checksumURL)
-	}
-
-	const maxChecksumFileSize = 1 << 20
-	limitedReader := io.LimitReader(resp.Body, maxChecksumFileSize)
-
-	data, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read checksum response: %w", err)
-	}
-
-	parseResult, parseError := parseChecksumWithAlgorithm(string(data), filename)
+	parseResult, parseError := parseChecksumWithAlgorithm(checksumFileContent, filename)
 	if parseError != nil {
 		return nil, parseError
 	}
 
-	algorithm := parseResult.algorithm
-	if algorithm == "" {
-		algorithm = inferAlgorithmFromURLPath(checksumURL)
-	}
-	if algorithm == "" {
-		algorithm = "sha256"
-	}
-
 	return &checksumInfo{
-		algorithm:    algorithm,
+		algorithm:    resolveChecksumAlgorithm(parseResult.algorithm, checksumURL),
 		expectedHash: parseResult.hash,
 		sourceURL:    checksumURL,
 	}, nil
+}
+
+// fetchChecksumFileContent downloads a checksum file over HTTPS (at most
+// maxVendorTextFileSize) and returns its text and its final URL after redirects.
+func fetchChecksumFileContent(httpClient *http.Client, checksumURL string) (content, finalURL string, err error) {
+	if !strings.HasPrefix(checksumURL, "https://") {
+		return "", "", fmt.Errorf("checksum URL must use HTTPS: %s", checksumURL)
+	}
+
+	resp, err := httpClient.Get(checksumURL) //nolint:noctx // URLs come from the Herdfile images section, validated as https
+	if err != nil {
+		return "", "", fmt.Errorf("cannot download checksum file: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("HTTP %d fetching checksum from %s", resp.StatusCode, checksumURL)
+	}
+
+	data, err := readVendorTextBody(resp.Body, checksumURL)
+	if err != nil {
+		return "", "", fmt.Errorf("cannot read checksum response: %w", err)
+	}
+	return string(data), resp.Request.URL.String(), nil
+}
+
+// resolveChecksumAlgorithm returns the algorithm found in the checksum file's
+// content, else the one its URL names, else sha256.
+func resolveChecksumAlgorithm(contentAlgorithm, checksumURL string) string {
+	if contentAlgorithm != "" {
+		return contentAlgorithm
+	}
+	if urlAlgorithm := inferAlgorithmFromURLPath(checksumURL); urlAlgorithm != "" {
+		return urlAlgorithm
+	}
+	return "sha256"
 }
 
 // inferAlgorithmFromURLPath determines the hash algorithm from the checksum
@@ -445,38 +495,60 @@ func parseChecksum(content, filename string) (string, error) {
 // checksum file. BSD-format lines embed the algorithm name (e.g. "SHA256 (...) = hash").
 func parseChecksumWithAlgorithm(content, filename string) (*checksumParseResult, error) {
 	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-----") || strings.HasPrefix(line, "Hash:") {
-			continue
-		}
-
-		// BSD format: "SHA256 (filename) = hash" or "SHA512 (filename) = hash"
-		if strings.Contains(line, "("+filename+")") && strings.Contains(line, " = ") {
-			parts := strings.SplitN(line, " = ", 2)
-			if len(parts) == 2 {
-				algorithm := inferAlgorithmFromBSDPrefix(line)
-				return &checksumParseResult{
-					hash:      strings.TrimSpace(parts[1]),
-					algorithm: algorithm,
-				}, nil
-			}
-		}
-
-		// coreutils format: "hash  filename" or "hash *filename"
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			candidateFilename := strings.TrimPrefix(fields[1], "*")
-			if candidateFilename == filename {
-				algorithm := inferAlgorithmFromHashLength(fields[0])
-				return &checksumParseResult{
-					hash:      fields[0],
-					algorithm: algorithm,
-				}, nil
-			}
+		if lineFilename, lineResult, isHashLine := parseChecksumLine(line); isHashLine && lineFilename == filename {
+			return lineResult, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no hash found for %q in checksum file", filename)
+	return nil, fmt.Errorf("no SHA-256 or SHA-512 hash found for %q in checksum file", filename)
+}
+
+// parseChecksumEntries returns every file a checksum file lists, by name. When
+// a name is listed twice, the first line wins, as in parseChecksumWithAlgorithm.
+func parseChecksumEntries(content string) map[string]*checksumParseResult {
+	entriesByFilename := make(map[string]*checksumParseResult)
+	for _, line := range strings.Split(content, "\n") {
+		lineFilename, lineResult, isHashLine := parseChecksumLine(line)
+		if _, alreadyListed := entriesByFilename[lineFilename]; isHashLine && !alreadyListed {
+			entriesByFilename[lineFilename] = lineResult
+		}
+	}
+	return entriesByFilename
+}
+
+// parseChecksumLine reads one checksum-file line: "ALGO (filename) = hash"
+// (BSD format) or "hash  filename" / "hash *filename" (coreutils format).
+// Comments, blank lines and PGP armor lines report isHashLine false.
+func parseChecksumLine(line string) (filename string, result *checksumParseResult, isHashLine bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-----") || strings.HasPrefix(line, "Hash:") {
+		return "", nil, false
+	}
+
+	// BSD format: "SHA256 (filename) = hash" or "SHA512 (filename) = hash"
+	if bsdNameAndHash := strings.SplitN(line, " = ", 2); len(bsdNameAndHash) == 2 {
+		openIndex := strings.Index(bsdNameAndHash[0], "(")
+		bsdHash := strings.TrimSpace(bsdNameAndHash[1])
+		if openIndex != -1 && strings.HasSuffix(bsdNameAndHash[0], ")") {
+			if !isSupportedHexDigest(bsdHash) {
+				return "", nil, false
+			}
+			return bsdNameAndHash[0][openIndex+1 : len(bsdNameAndHash[0])-1], &checksumParseResult{
+				hash:      bsdHash,
+				algorithm: inferAlgorithmFromBSDPrefix(line),
+			}, true
+		}
+	}
+
+	// coreutils format: "hash  filename" or "hash *filename"
+	fields := strings.Fields(line)
+	if len(fields) < 2 || !isSupportedHexDigest(fields[0]) {
+		return "", nil, false
+	}
+	return strings.TrimPrefix(fields[1], "*"), &checksumParseResult{
+		hash:      fields[0],
+		algorithm: inferAlgorithmFromHashLength(fields[0]),
+	}, true
 }
 
 // inferAlgorithmFromBSDPrefix extracts the algorithm from a BSD-format checksum
@@ -492,12 +564,29 @@ func inferAlgorithmFromBSDPrefix(line string) string {
 	return ""
 }
 
+// sha256HexDigestLength and sha512HexDigestLength are the hex lengths of the
+// two digests vmherd verifies.
+const (
+	sha256HexDigestLength = 64
+	sha512HexDigestLength = 128
+)
+
+// isSupportedHexDigest reports whether a checksum-file hash is a SHA-256 or
+// SHA-512 hex digest: 64 or 128 hex digits, nothing else.
+func isSupportedHexDigest(hexDigest string) bool {
+	if len(hexDigest) != sha256HexDigestLength && len(hexDigest) != sha512HexDigestLength {
+		return false
+	}
+	_, decodeError := hex.DecodeString(hexDigest)
+	return decodeError == nil
+}
+
 // inferAlgorithmFromHashLength guesses the algorithm from hex digest length.
 func inferAlgorithmFromHashLength(hexDigest string) string {
 	switch len(hexDigest) {
-	case 64:
+	case sha256HexDigestLength:
 		return "sha256"
-	case 128:
+	case sha512HexDigestLength:
 		return "sha512"
 	default:
 		return ""

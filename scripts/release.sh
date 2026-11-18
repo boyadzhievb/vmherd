@@ -9,10 +9,13 @@
 #
 # What it does:
 #   1. Validates tag format and clean working tree
-#   2. Inserts changelog entry into CHANGELOG.md
-#   3. Commits bookkeeping changes
-#   4. Creates an annotated git tag
-#   5. Prints the push command
+#   2. Checks the image URLs in docs/images.md (go run ./cmd/image-urls-check);
+#      stale ones are rewritten in the working tree and the script stops
+#      before the changelog, so you review, commit and run it again
+#   3. Inserts changelog entry into CHANGELOG.md
+#   4. Commits bookkeeping changes
+#   5. Creates an annotated git tag
+#   6. Prints the push command
 #
 # After running, review with "git log --oneline -2" and "git diff HEAD~1",
 # then push: git push && git push origin <tag>
@@ -58,6 +61,19 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
     echo "Error: tag ${TAG} already exists."
     exit 1
 fi
+
+# --- Check image URLs ---
+# Runs after the clean-tree check: a rewrite leaves a dirty tree, which blocks
+# the next run until the rewrite is reviewed and committed.
+
+echo "==> Checking image URLs in docs/images.md..."
+
+if ! (cd "$REPO_ROOT" && go run ./cmd/image-urls-check --repo "$REPO_ROOT"); then
+    echo ""
+    echo "Error: image URLs changed or failed — review 'git diff', commit, and run the release again."
+    exit 1
+fi
+echo ""
 
 # --- Update changelog ---
 

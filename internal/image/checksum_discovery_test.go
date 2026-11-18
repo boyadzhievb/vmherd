@@ -134,3 +134,73 @@ func TestExtractChecksumLinksSkipsUnsupportedAlgorithms(t *testing.T) {
 		t.Errorf("links = %q, want %q", links, want)
 	}
 }
+
+// TestParseChecksumEntriesListsEveryFile checks that the full listing reads
+// BSD and coreutils lines alike and skips comments and PGP armor.
+func TestParseChecksumEntriesListsEveryFile(t *testing.T) {
+	sha256Hash := strings.Repeat("ab", 32)
+	sha512Hash := strings.Repeat("cd", 64)
+	checksumFileContent := "-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA256\n\n" +
+		"# Fedora-Cloud-Base-Generic-45-1.5.x86_64.qcow2: 512 bytes\n" +
+		"SHA256 (Fedora-Cloud-Base-Generic-45-1.5.x86_64.qcow2) = " + sha256Hash + "\n" +
+		sha512Hash + " *debian-13-genericcloud-amd64.qcow2\n" +
+		"-----BEGIN PGP SIGNATURE-----\niQIzBAEBCAAd\n-----END PGP SIGNATURE-----\n"
+
+	entriesByFilename := parseChecksumEntries(checksumFileContent)
+	if len(entriesByFilename) != 2 {
+		t.Fatalf("entries = %v, want exactly the two listed files", entriesByFilename)
+	}
+	if fedoraEntry := entriesByFilename["Fedora-Cloud-Base-Generic-45-1.5.x86_64.qcow2"]; fedoraEntry == nil || fedoraEntry.hash != sha256Hash || fedoraEntry.algorithm != "sha256" {
+		t.Errorf("Fedora entry = %+v, want sha256 %s", fedoraEntry, sha256Hash)
+	}
+	if debianEntry := entriesByFilename["debian-13-genericcloud-amd64.qcow2"]; debianEntry == nil || debianEntry.hash != sha512Hash || debianEntry.algorithm != "sha512" {
+		t.Errorf("Debian entry = %+v, want sha512 %s", debianEntry, sha512Hash)
+	}
+}
+
+// TestParseChecksumLineRejectsNonHexHash checks that only 64- or 128-digit
+// hex hashes count, so a tampered line can't put escape codes or other text
+// into the checker's report or the download check.
+func TestParseChecksumLineRejectsNonHexHash(t *testing.T) {
+	escapeHash := "\x1b[31m" + strings.Repeat("ab", 28) + "\x1b[0m"
+	checksumFileContent := "SHA256 (escape.qcow2) = " + escapeHash + "\n" +
+		strings.Repeat("zz", 32) + " *not-hex.qcow2\n" +
+		strings.Repeat("ab", 20) + " *short.qcow2\n" +
+		strings.Repeat("AB", 32) + " *upper.qcow2\n"
+
+	entriesByFilename := parseChecksumEntries(checksumFileContent)
+	for _, rejectedFilename := range []string{"escape.qcow2", "not-hex.qcow2", "short.qcow2"} {
+		if rejectedEntry, listed := entriesByFilename[rejectedFilename]; listed {
+			t.Errorf("%s listed with hash %q, want it skipped", rejectedFilename, rejectedEntry.hash)
+		}
+	}
+	if _, listed := entriesByFilename["upper.qcow2"]; !listed {
+		t.Errorf("upper-case hex hash for upper.qcow2 was skipped")
+	}
+	if _, err := parseChecksum(checksumFileContent, "not-hex.qcow2"); err == nil {
+		t.Errorf("parseChecksum took a non-hex hash for not-hex.qcow2")
+	}
+}
+
+// oversizeVendorResponseBytes is one byte more than the 1 MiB that vmherd
+// reads from a directory listing or checksum file.
+const oversizeVendorResponseBytes = 1<<20 + 1
+
+// TestOversizeVendorResponseFails checks that a listing or checksum file over
+// the size limit fails instead of being read cut off.
+func TestOversizeVendorResponseFails(t *testing.T) {
+	oversizeBody := strings.Repeat("x", oversizeVendorResponseBytes)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if _, writeError := fmt.Fprint(writer, oversizeBody); writeError != nil {
+			t.Errorf("writing oversize response: %v", writeError)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := scrapeChecksumURLsFromDirectory(server.Client(), server.URL+"/images/", archImageFilename); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("oversize listing: error = %v, want one saying it is larger than the limit", err)
+	}
+	if _, err := fetchChecksumFromURL(server.Client(), server.URL+"/images/SHA256SUMS", archImageFilename); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("oversize checksum file: error = %v, want one saying it is larger than the limit", err)
+	}
+}

@@ -1,5 +1,6 @@
-// Package tooling checks the developer tooling in the repository (Claude Code
-// skills), not vmherd behaviour. It needs no libvirt and runs in CI.
+// Package tooling checks the developer tooling and docs in the repository
+// (Claude Code skills, the image URL guide docs/images.md and its links), not
+// vmherd behaviour. It needs no libvirt and runs in CI.
 package tooling
 
 import (

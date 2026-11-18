@@ -29,6 +29,7 @@ Out of scope, by the user's decision (2026-11-18): an image list file such as `i
 
 ### Modified Capabilities
 - `herdfile`: the Example Herdfile requirement gains the comment that points to `docs/images.md`.
+- `images` (added in the review rework, 2026-11-18): "Verified during download" no longer uses hashes that aren't 64 or 128 hex digits, and fails on a listing or checksum file over 1 MiB instead of reading it cut off (shared with the checker).
 
 ## Impact
 

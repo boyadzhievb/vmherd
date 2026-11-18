@@ -136,7 +136,7 @@ vmherd checks the whole Herdfile before doing anything: unknown keys (typos such
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `images` | required | Map of `distro:codename` to the vendor's `https://` image URL. Every VM's `image` must be listed here. `vmherd init` writes entries for the supported images |
+| `images` | required | Map of `distro:codename` to the vendor's `https://` image URL. Every VM's `image` must be listed here. `vmherd init` writes entries for the supported images; to find the URL for another one, see [docs/images.md](docs/images.md) |
 
 ### VM fields
 
@@ -246,7 +246,7 @@ Commands that act on several VMs (`up`, `down`, `restart`, `reload`, `destroy`) 
 | `almalinux:9` | AlmaLinux 9 |
 | `arch:latest` | Arch Linux |
 
-All images are downloaded directly from official distro vendors and verified with SHA256 checksums. `vmherd init` writes the download URLs for `ubuntu:noble`, `ubuntu:resolute`, `fedora:44` and `fedora:45`; for the others, add the vendor's image URL under `images:`. If a vendor stops publishing a file (Fedora pins a build number in the file name), `vmherd up`/`pull` say so and point to the directory with the current file name.
+All images are downloaded directly from official distro vendors and verified with SHA256 checksums. `vmherd init` writes the download URLs for `ubuntu:noble`, `ubuntu:resolute`, `fedora:44` and `fedora:45`; for the others, add the vendor's image URL under `images:`. To find the URL for an image, see [docs/images.md](docs/images.md). If a vendor stops publishing a file (Fedora pins a build number in the file name), `vmherd up`/`pull` say so and point to the directory with the current file name.
 
 ## How It Works
 

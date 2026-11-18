@@ -21,7 +21,7 @@ This is a remediation plan, separate from the product roadmap milestones.
 | M0 | Unblock tooling, stop data loss and host compromise | 10 | 10 |
 | M1 | Correctness of existing features | 21 | 20 |
 | M2 | Structure: state, abstractions, deduplication | 9 | 0 |
-| M3 | Supply chain, SSH trust, CI | 11 | 0 |
+| M3 | Supply chain, SSH trust, CI | 11 | 1 |
 | M4 | LLM infrastructure (`CLAUDE.md`, `.claude/`, OpenSpec) | 9 | 2 |
 | M5 | Features: bridge networking (v0.4.0), share types | 3 | 1 |
 | M6 | Team adoption: locked images, config changes, snapshots, distro tests, project ownership, acceptance scenarios | 9 | 2 |
@@ -424,6 +424,8 @@ Note: the default network name collision is handled under M1.2.
     - Compare hashes with `strings.EqualFold`.
     - Remove the misleading `nolint` comments.
   - **Done when:** `httptest` cases cover the timeout, the HTTPS→HTTP redirect, and an uppercase checksum.
+  - **Note (2026-11-18, M3.11 review):** `internal/imageurls` (the release URL checker) already has an HTTPS-only `CheckRedirect` with a hop limit and a request timeout; `vmherd pull` still uses `http.DefaultClient`. Share that policy here.
+  - **Note (2026-11-18, M3.11 second review):** three older `pull` issues for this item: absolute-path hrefs in a listing resolve to `dir//pub/…` (`extractChecksumLinksFromHTML`); pull accepts checksum links outside the image directory (the checker refuses them); `defer func() { _ = resp.Body.Close() }()` swallows close errors in download.go.
 
 - [ ] **M3.2 — Make the cache safe under concurrent use** · Low
   - **Files:** `internal/image/download.go:33,330`
@@ -437,6 +439,8 @@ Note: the default network name collision is handled under M1.2.
   - **Fix:** Embed vendor signing keys and verify `SHA256SUMS.gpg` (Ubuntu), the clearsigned `CHECKSUM` (Fedora) and `SHA512SUMS.sign` (Debian) with an OpenPGP library. Also support a pinned `sha256:` per image in the Herdfile (`images: { ubuntu:noble: { url: …, sha256: … } }`), and have `vmherd pull` print the hash so users can pin it.
   - **Done when:** A tampered checksum file fails verification in tests, and a pinned hash overrides discovery.
   - **Note (2026-11-11):** pinning is planned as a lockfile (`Herd.lock`, M6.1) instead of a `sha256:` key in the Herdfile, and comes first; vendor signatures stay here.
+  - **Note (2026-11-18, M3.11 security review H1):** `download.fedoraproject.org` redirects every request (image, listing, CHECKSUM) to a third-party mirror, so the release URL checker (M3.11) can be offered a fake "newer build" with its hash by a bad mirror. M3.11 only prints which mirror vouched for a replacement; verifying the signed CHECKSUM here closes it for both `pull` and the checker.
+  - **Note (2026-11-18, M3.11 second review):** an upper-case hex hash in a checksum file passes parsing, but `pull` compares it with `!=` against lower-case `hex.EncodeToString`, so a valid image is reported as corrupted. Lower-case the parsed hash here.
 
 - [ ] **M3.4 — 🧭 Decide the image registry model** · Med
   - **Problem:** CLAUDE.md says "built-in registry, no user URLs"; the code requires an `images:` map of URLs in the Herdfile.
@@ -477,6 +481,7 @@ Note: the default network name collision is handled under M1.2.
   - **Problem:** A tag push builds and publishes without running tests. There's no build provenance or SBOM.
   - **Fix:** Add a `test` job that `build` depends on. Add `actions/attest-build-provenance` and an SBOM (`anchore/sbom-action`), all pinned to SHAs. Publish one `SHA256SUMS` file for all archives.
   - **Done when:** A release created from a commit with failing tests is blocked, and attestations appear on the release.
+  - **Note (2026-11-18, M3.11 security review L7):** `build` inherits the workflow-level `contents: write`; only `release` needs it. Set `contents: read` at the top and `write` on `release` here.
 
 - [ ] **M3.10 — Coverage threshold** · Low
   - **Files:** `.github/workflows/pr-quality.yml`
@@ -484,7 +489,7 @@ Note: the default network name collision is handled under M1.2.
   - **Fix:** Raise it step by step as M2.3 lands (40 → 50 → 60%). Also give `cmd/vmherd` its own floor, so pure packages can't hide it: 40% once M2.3 lands (it is 4% on 2026-11-11), then raised with the total.
   - **Done when:** The total threshold is ≥ 60% and the `cmd/vmherd` floor is enforced in CI.
 
-- [ ] **M3.11 — Herdfile comment that points to an image URL guide on GitHub; release checks the URLs** · Med
+- [x] **M3.11 — Herdfile comment that points to an image URL guide on GitHub; release checks the URLs** · Med
   - **OpenSpec change:** [`image-url-guidance`](openspec/changes/image-url-guidance/) (checklist and results in its `tasks.md`).
   - **Files:** the `vmherd init` Herdfile template (`internal/config/`), `internal/config/images.go`, new `docs/images.md` (the guide), `README.md` (references the guide), `scripts/release.sh`, `.github/workflows/release.yml`, a small URL checker
   - **Problem:** Users have no way to find the right URL for an image. `vmherd init` writes URLs for only 4 images (ubuntu noble/resolute, fedora 44/45). The README names 10 and says "add the vendor's image URL" for the other 6, without saying where to look or which file to pick. Vendors publish several variants (Debian `genericcloud` has no 9p, as M1.20 found; Rocky `GenericCloud` vs `EC2`), and Fedora's file names pin a build number.
@@ -495,6 +500,7 @@ Note: the default network name collision is handled under M1.2.
     - `docs/images.md` exists, the link in the comment names its path, and the README references it (image section and `images` row).
     - The checker has unit tests on recorded vendor listings: still current, moved (finds the new file and rewrites both files), and gone (fails, no guess).
     - `release.sh` stops before tagging on a stale URL, and `release.yml` runs the check; both shown once (a dry run of `release.sh` with a stale URL is enough).
+  - **Result (2026-11-18):** `vmherd init` writes a comment above `images:` linking to the new guide `docs/images.md` (vendor directories, which file to pick, the 9p and Fedora build traps, and the 8 URLs CI boots); the README references it in its image section and the `images` row. A test keeps `init`'s URLs and the e2e table inside the guide's table. New developer tool `cmd/image-urls-check` (`internal/imageurls`, not in the release archives): for each guide URL it requires a 2xx answer and the file name in a checksum file of the image's own directory; a stale Fedora-style build is replaced only by a newer build in the same directory (architecture, format and release numbers fixed) that answers and is listed, and the URL is rewritten in `images.go`, the guide and the e2e table for review. It fails instead of guessing when nothing matches, builds tie, or any checksum file couldn't be read. `scripts/release.sh` runs it before the changelog and tag and stops on any change or failure; `release.yml` runs `--check` before building. Review (`code-reviewer`, `security-audit`, then a second `security-audit` of the rework): no high left; H1 (Fedora's listing and CHECKSUM come from third-party mirrors) is only made visible (the output names the mirror) and stays with M3.3; older `pull` issues noted on M3.1 and M3.9. `pull` changed only to reject non-hex hashes and to fail on vendor files over 1 MiB. Verified: real vendors all 8 OK; a `release.sh` dry run with a gone Fedora build rewrote it to the current one, printed the mirror, and stopped with no tag. Still open: the `release.yml` job's first real run (task 4.5, next release).
 
 ---
 

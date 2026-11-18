@@ -9,7 +9,28 @@ permissions:
   contents: write
 
 jobs:
+  image-urls:
+    # Safety net for scripts/release.sh: a URL that went stale after tagging
+    # stops the release before anything is built or published.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Check image URLs
+        run: |
+          if ! go run ./cmd/image-urls-check --check; then
+            echo "::error::An image URL in docs/images.md is stale or failed (see the log above), so ${GITHUB_REF_NAME} is not released. Fix the URL (scripts/release.sh rewrites stale ones), commit, and release the next patch version; never retag. If the log shows a network or vendor error rather than STALE, re-run the failed job."
+            exit 1
+          fi
+
   build:
+    needs: image-urls
     runs-on: ubuntu-latest
     strategy:
       matrix:

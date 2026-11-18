@@ -250,6 +250,9 @@ func ImageCacheDir() string {
 var exampleHerdfileTemplate = template.Must(template.New("Herdfile").Parse(`# Herdfile — vmherd VM definitions
 # Docs: https://github.com/boyadzhievb/vmherd
 
+# Images: each VM's image must be listed here with the vendor's download URL.
+# To find the URL for another distro or release, see
+# https://github.com/boyadzhievb/vmherd/blob/main/docs/images.md
 images:
 {{- range .Images}}
   {{.Name}}: {{.URL}}

@@ -239,6 +239,49 @@ func TestExampleHerdfilePassesValidation(t *testing.T) {
 	}
 }
 
+// TestExampleHerdfilePointsToImageURLGuide checks that the lines directly
+// above images: tell the user where to find an image URL and link the guide,
+// and that the example still passes validation.
+func TestExampleHerdfilePointsToImageURLGuide(t *testing.T) {
+	wantCommentLines := []string{
+		"# Images: each VM's image must be listed here with the vendor's download URL.",
+		"# To find the URL for another distro or release, see",
+		"# https://github.com/boyadzhievb/vmherd/blob/main/docs/images.md",
+	}
+	projectDir := t.TempDir()
+	networkName, err := DefaultNetworkName(projectDir)
+	if err != nil {
+		t.Fatalf("default network name: %v", err)
+	}
+	exampleContent, err := ExampleHerdfile(networkName, "192.168.151")
+	if err != nil {
+		t.Fatalf("rendering example: %v", err)
+	}
+
+	exampleLines := strings.Split(exampleContent, "\n")
+	imagesLineIndex := -1
+	for lineIndex, exampleLine := range exampleLines {
+		if exampleLine == "images:" {
+			imagesLineIndex = lineIndex
+			break
+		}
+	}
+	if imagesLineIndex < len(wantCommentLines) {
+		t.Fatalf("example has no images: line with %d lines above it:\n%s", len(wantCommentLines), exampleContent)
+	}
+	gotCommentLines := exampleLines[imagesLineIndex-len(wantCommentLines) : imagesLineIndex]
+	if strings.Join(gotCommentLines, "\n") != strings.Join(wantCommentLines, "\n") {
+		t.Errorf("lines above images: =\n%s\nwant\n%s", strings.Join(gotCommentLines, "\n"), strings.Join(wantCommentLines, "\n"))
+	}
+
+	if err := os.WriteFile(filepath.Join(projectDir, HerdfileName), []byte(exampleContent), 0o644); err != nil {
+		t.Fatalf("writing example: %v", err)
+	}
+	if _, err := Load(projectDir); err != nil {
+		t.Errorf("example Herdfile with the guide comment fails validation: %v", err)
+	}
+}
+
 func TestDefaultNetworkNameIsProjectUnique(t *testing.T) {
 	firstName, err := DefaultNetworkName("/home/user/a/web")
 	if err != nil {

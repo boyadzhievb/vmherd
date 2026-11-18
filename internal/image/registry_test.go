@@ -86,32 +86,32 @@ func TestListAll(t *testing.T) {
 }
 
 func TestParseChecksumSha256sumFormat(t *testing.T) {
-	content := `abc123def456  *noble-server-cloudimg-amd64.img
+	content := `a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1  *noble-server-cloudimg-amd64.img
 deadbeef1234  *noble-server-cloudimg-amd64.manifest`
 
 	hash, err := parseChecksum(content, "noble-server-cloudimg-amd64.img")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if hash != "abc123def456" {
-		t.Errorf("expected abc123def456, got %s", hash)
+	if hash != "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1" {
+		t.Errorf("expected a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1, got %s", hash)
 	}
 }
 
 func TestParseChecksumBSDFormat(t *testing.T) {
-	content := `SHA256 (Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2) = abc123hash456`
+	content := `SHA256 (Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2) = b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2`
 
 	hash, err := parseChecksum(content, "Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if hash != "abc123hash456" {
-		t.Errorf("expected abc123hash456, got %s", hash)
+	if hash != "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2" {
+		t.Errorf("expected b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2, got %s", hash)
 	}
 }
 
 func TestParseChecksumNotFound(t *testing.T) {
-	content := `abc123  *other-file.img`
+	content := `5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c  *other-file.img`
 
 	_, err := parseChecksum(content, "missing-file.img")
 	if err == nil {
@@ -138,8 +138,8 @@ func TestParseChecksumCommentOnly(t *testing.T) {
 
 // TestParseChecksumWhitespaceLines verifies that blank lines are skipped and a valid checksum is still found.
 func TestParseChecksumWhitespaceLines(t *testing.T) {
-	contentWithBlanks := "\n\n  \nabc999def888  *cloud-image.img\n\n"
-	expectedHash := "abc999def888"
+	contentWithBlanks := "\n\n  \nc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3  *cloud-image.img\n\n"
+	expectedHash := "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
 
 	hash, err := parseChecksum(contentWithBlanks, "cloud-image.img")
 	if err != nil {
@@ -153,15 +153,15 @@ func TestParseChecksumWhitespaceLines(t *testing.T) {
 // TestParseChecksumExactMatchIgnoresManifest verifies that exact matching
 // prevents ".manifest" suffix lines from matching the base filename.
 func TestParseChecksumExactMatchIgnoresManifest(t *testing.T) {
-	contentWithManifest := `manifesthash  *noble-server-cloudimg-amd64.img.manifest
-realhash12345  *noble-server-cloudimg-amd64.img`
+	contentWithManifest := `d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4  *noble-server-cloudimg-amd64.img.manifest
+e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5  *noble-server-cloudimg-amd64.img`
 
 	hash, err := parseChecksum(contentWithManifest, "noble-server-cloudimg-amd64.img")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if hash != "realhash12345" {
-		t.Errorf("expected realhash12345, got %s", hash)
+	if hash != "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5" {
+		t.Errorf("expected e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5, got %s", hash)
 	}
 }
 
@@ -177,39 +177,39 @@ func TestParseChecksumExactMatchPreventsSubstring(t *testing.T) {
 	}{
 		{
 			name:     "substring filename does not match longer sha256sum entry",
-			content:  "wronghash123  *amd64-disk-kvm.img\n",
+			content:  "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6  *amd64-disk-kvm.img\n",
 			filename: "amd64.img",
 			wantErr:  true,
 		},
 		{
 			name:     "substring filename does not match longer BSD entry",
-			content:  "SHA256 (amd64-disk-kvm.img) = wronghash123\n",
+			content:  "SHA256 (amd64-disk-kvm.img) = f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6\n",
 			filename: "amd64.img",
 			wantErr:  true,
 		},
 		{
 			name:     "exact match found among similar filenames in sha256sum format",
-			content:  "wronghash  *noble.img-kvm\ncorrecthash  *noble.img\nanotherhash  *noble.img.manifest\n",
+			content:  "0707070707070707070707070707070707070707070707070707070707070707  *noble.img-kvm\n1818181818181818181818181818181818181818181818181818181818181818  *noble.img\n2929292929292929292929292929292929292929292929292929292929292929  *noble.img.manifest\n",
 			filename: "noble.img",
-			wantHash: "correcthash",
+			wantHash: "1818181818181818181818181818181818181818181818181818181818181818",
 		},
 		{
 			name:     "exact match found among similar filenames in BSD format",
-			content:  "SHA256 (noble.img-kvm) = wronghash\nSHA256 (noble.img) = correcthash\nSHA256 (noble.img.manifest) = anotherhash\n",
+			content:  "SHA256 (noble.img-kvm) = 0707070707070707070707070707070707070707070707070707070707070707\nSHA256 (noble.img) = 1818181818181818181818181818181818181818181818181818181818181818\nSHA256 (noble.img.manifest) = 2929292929292929292929292929292929292929292929292929292929292929\n",
 			filename: "noble.img",
-			wantHash: "correcthash",
+			wantHash: "1818181818181818181818181818181818181818181818181818181818181818",
 		},
 		{
 			name:     "star prefix stripped for exact comparison",
-			content:  "starhash  *cloud-image.qcow2\n",
+			content:  "3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a  *cloud-image.qcow2\n",
 			filename: "cloud-image.qcow2",
-			wantHash: "starhash",
+			wantHash: "3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a",
 		},
 		{
 			name:     "no star prefix still matches exactly",
-			content:  "plainhash  cloud-image.qcow2\n",
+			content:  "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b  cloud-image.qcow2\n",
 			filename: "cloud-image.qcow2",
-			wantHash: "plainhash",
+			wantHash: "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
 		},
 	}
 
