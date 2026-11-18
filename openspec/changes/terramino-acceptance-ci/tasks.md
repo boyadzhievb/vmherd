@@ -65,7 +65,7 @@
 
 - [x] 4.1 `gofmt -l .` is empty; `go vet ./...` passes; `golangci-lint run` and `golangci-lint run --build-tags integration` report nothing new; `go test ./...` passes; `openspec validate terramino-acceptance-ci --strict` passes.
   - 2026-11-17, main session: `gofmt -l .` is empty; `go vet ./...` and `go vet -tags integration ./...` are clean; `golangci-lint run`: `0 issues.`; `go test -count=1 ./...`: every package ok; `openspec validate terramino-acceptance-ci --strict`: valid. `golangci-lint run --build-tags integration` reports one issue, `internal/vm/vm_integration_test.go: const integrationDomain is unused`. No M6.9 commit touches that file, so it is not new. It is left for the user to decide, not fixed on the side.
-- [ ] 4.2 Independent review of the diff with the `code-reviewer` agent; record each finding as fixed or rejected (with the reason) on this task's line.
+- [x] 4.2 Independent review of the diff with the `code-reviewer` agent; record each finding as fixed or rejected (with the reason) on this task's line.
   - 2026-11-17, `code-reviewer` (Opus, high): request changes, light. No high findings; 4 medium, 6 low, 6 nits; the main session checked M1–M4 in the code. The user chose option A:
     - to fix, M1: multi checks only `8081/` (static nginx) and `8080/api/scores`, so the frontend→backend proxy and the backend→redis link from the spec go unchecked. Add `8081/api/scores` through the proxy; check once by hand whether it fails with redis stopped, and if not, add a redis check or narrow the spec;
     - to fix, M2: `checkDownUpKeepsData` passes even if `down` never stops the VMs. Compare `/proc/sys/kernel/random/boot_id` per VM before and after;
@@ -93,7 +93,7 @@
     - L6 seen in a real failure: backend failed with `redis.local did not resolve within 60 s — is avahi-daemon running on redis?`.
     - M3 verified, with a limit: `kill -9` of the single subtest during down + up left 1 domain and no port holder; the rerun removed the domain, disk, seed and network first, then passed in 237 s, leaving nothing. A stale tunnel still holding a port (lead-developer's doubt 1) did not occur, so it was not tested.
     - Found: the copy's redis VM failed `apt-get install` with `zstd error: Data corruption detected` in `git_2.43.0-1ubuntu7.4_amd64.deb`, which apt had hash-checked on download. That points at disk or memory on m4800 or in the guest; seen once in about 10 boots. Watch for it; not an M6.9 item.
-    - Still to do: the CI dispatch with `scenarios=true` for 5e41a6b on y510p, then tick 4.2.
+    - CI check of the rework (2026-11-18): dispatch `scenarios=true` on `42d34c4` (includes 5e41a6b), y510p, [run 44274070481](https://github.com/boyadzhievb/vmherd/actions/runs/44274070481): `--- PASS: TestAcceptanceScenarios (1586.11s)`, single 610.17 s, multi 975.94 s. Push CI on 5e41a6b and 42d34c4 green.
 - [ ] 4.3 Tick M6.9 in milestone.md and add its Result note: the failing runs from 1.1, 1.3 and 2.2, the fixes, the .71 results and durations, the negative check, and any new items filed. Update the Progress table (M6 done count) in the same commit.
 
 ## Workflow follow-up
