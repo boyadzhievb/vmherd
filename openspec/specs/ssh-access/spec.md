@@ -89,9 +89,9 @@ For each VM with `ports:`, vmherd SHALL run one background `ssh -N -L` tunnel on
 - **Test:** internal/portfwd/TestRecordRoundTripAndStaleRecord, internal/portfwd/TestCorruptRecordIsActionable, internal/portfwd/TestProcessRunsCommandAndStop, internal/portfwd/TestDescribeForwards
 
 #### Scenario: Forwarded port answers
-- **WHEN** up finishes for a VM forwarding host 8080 to guest 80 where a web server runs
+- **WHEN** up finishes for a VM forwarding host 8080 to guest 8080 where a web server listens
 - **THEN** `curl http://127.0.0.1:8080` reaches it
-- **Test:** none yet — planned in M6.9 (Terramino scenarios)
+- **Test:** test/e2e/TestAcceptanceScenarios (checkForwardedPorts)
 
 ### Requirement: TCP only, no firewall rules
 Port forwarding SHALL support TCP only and refuse `protocol: udp` with an explanation. vmherd SHALL add no firewall rules and SHALL remove the iptables rules v0.1.x added.
